@@ -237,7 +237,7 @@ public class ExampleMetadataHandlerTest
 
             req = new GetTableLayoutRequest(IdentityUtil.fakeIdentity(), "queryId", "default",
                     new TableName("schema1", "table1"),
-                    new Constraints(constraintsMap, Collections.emptyList(), AggregateFunctionClause.emptyAggregateFunctionClause(), -1),
+                    new Constraints(constraintsMap, Collections.emptyList(), AggregateFunctionClause.emptyAggregateFunctionClause(), Collections.emptyList(), -1),
                     tableSchema,
                     partitionCols);
             ObjectMapperUtil.assertSerialization(req);
@@ -316,7 +316,7 @@ public class ExampleMetadataHandlerTest
                 new TableName("schema", "table_name"),
                 partitions,
                 partitionCols,
-                new Constraints(constraintsMap, Collections.emptyList(), AggregateFunctionClause.emptyAggregateFunctionClause(), -1),
+                new Constraints(constraintsMap, Collections.emptyList(), AggregateFunctionClause.emptyAggregateFunctionClause(), Collections.emptyList(), -1),
                 continuationToken);
         int numContinuations = 0;
         do {
