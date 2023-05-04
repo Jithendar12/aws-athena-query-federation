@@ -60,7 +60,7 @@ public class TeradataRecordHandler extends JdbcRecordHandler
     public TeradataRecordHandler(DatabaseConnectionConfig databaseConnectionConfig, JdbcConnectionFactory jdbcConnectionFactory, java.util.Map<String, String> configOptions)
     {
         this(databaseConnectionConfig, AmazonS3ClientBuilder.defaultClient(), AWSSecretsManagerClientBuilder.defaultClient(), AmazonAthenaClientBuilder.defaultClient(),
-                jdbcConnectionFactory, new TeradataQueryStringBuilder(TERADATA_QUOTE_CHARACTER), configOptions);
+                jdbcConnectionFactory, new TeradataQueryStringBuilder(TERADATA_QUOTE_CHARACTER, new TeradataFederationExpressionParser(TERADATA_QUOTE_CHARACTER)), configOptions);
     }
 
     @VisibleForTesting
