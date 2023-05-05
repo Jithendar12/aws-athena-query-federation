@@ -78,7 +78,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.amazonaws.athena.connector.lambda.domain.predicate.functions.StandardFunctions.ARRAY_CONSTRUCTOR_FUNCTION_NAME;
 import static com.amazonaws.athena.connector.lambda.domain.predicate.functions.StandardFunctions.IS_DISTINCT_FROM_OPERATOR_FUNCTION_NAME;
 
 public class SynapseMetadataHandler extends JdbcMetadataHandler
