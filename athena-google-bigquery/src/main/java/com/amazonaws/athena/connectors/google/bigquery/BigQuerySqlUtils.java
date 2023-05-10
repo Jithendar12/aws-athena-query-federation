@@ -23,12 +23,14 @@ package com.amazonaws.athena.connectors.google.bigquery;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
+import com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.ValueSet;
 import com.google.cloud.bigquery.QueryParameterValue;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import org.apache.arrow.vector.types.pojo.ArrowType;
@@ -46,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Utilities that help with Sql operations.
@@ -99,6 +102,11 @@ public class BigQuerySqlUtils
                     .append(Joiner.on(" AND ").join(clauses));
         }
 
+        String orderByClause = extractOrderByClause(constraints);
+        if (!Strings.isNullOrEmpty(orderByClause)) {
+            sqlBuilder.append(" ").append(orderByClause);
+        }
+
         if (limitAndOffsets.size() > 0) {
             for (Map.Entry<String, String> entry : limitAndOffsets.entrySet()) {
                 LOGGER.info("entry.getValue())" + entry.getValue());
@@ -106,7 +114,7 @@ public class BigQuerySqlUtils
                 sqlBuilder.append(" limit " + entry.getKey() + " offset " + entry.getValue());
             }
         }
-
+        LOGGER.info("Generated SQL : {}", sqlBuilder.toString());
         return sqlBuilder.toString();
     }
 
@@ -272,5 +280,20 @@ public class BigQuerySqlUtils
                 throw new IllegalArgumentException("Unknown type has been encountered during range processing: " + columnName +
                     " Field Type: " + arrowType.getTypeID().name());
         }
+    }
+
+    private static String extractOrderByClause(Constraints constraints)
+    {
+        List<OrderByField> orderByClause = constraints.getOrderByClause();
+        if (orderByClause == null || orderByClause.size() == 0) {
+            return "";
+        }
+        return "ORDER BY " + orderByClause.stream()
+                .map(orderByField -> {
+                    String ordering = orderByField.getDirection().isAscending() ? "ASC" : "DESC";
+                    String nullsHandling = orderByField.getDirection().isNullsFirst() ? "NULLS FIRST" : "NULLS LAST";
+                    return quote(orderByField.getColumnName()) + " " + ordering + " " + nullsHandling;
+                })
+                .collect(Collectors.joining(", "));
     }
 }
