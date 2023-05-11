@@ -71,6 +71,9 @@ public class TeradataFederationExpressionParser extends JdbcFederationExpression
             case MODULUS_FUNCTION_NAME:
                 clause = Joiner.on(" MOD ").join(arguments);
                 break;
+            case ARRAY_CONSTRUCTOR_FUNCTION_NAME:
+                clause = writeArrayConstructorClause(type, arguments);
+                break;
             default:
                 clause = super.mapFunctionToDataSourceSyntax(functionName, type, arguments);
         }
