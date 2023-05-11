@@ -107,7 +107,11 @@ public class BigQuerySqlUtils
             sqlBuilder.append(" ").append(orderByClause);
         }
 
-        if (limitAndOffsets.size() > 0) {
+        if (constraints.getLimit() > 0) {
+            sqlBuilder.append(" limit " + constraints.getLimit());
+        }
+
+        else if (limitAndOffsets.size() > 0) {
             for (Map.Entry<String, String> entry : limitAndOffsets.entrySet()) {
                 LOGGER.info("entry.getValue())" + entry.getValue());
                 LOGGER.info("entry.getKey()" + entry.getKey());

@@ -1,6 +1,6 @@
 /*-
  * #%L
- * athena-mysql
+ * athena-bigquery
  * %%
  * Copyright (C) 2019 - 2022 Amazon Web Services
  * %%
