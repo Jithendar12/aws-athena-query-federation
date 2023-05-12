@@ -127,25 +127,27 @@ public class BigQuerySqlUtils
         return BIGQUERY_QUOTE_CHAR + identifier + BIGQUERY_QUOTE_CHAR;
     }
 
-    private static List<String> toConjuncts(List<Field> columns, Constraints constraints, Map<String, String> partitionSplit, List<QueryParameterValue> parameterValues)
-    {
-        LOGGER.info("Inside toConjuncts(): ");
-        ImmutableList.Builder<String> builder = ImmutableList.builder();
-        for (Field column : columns) {
-            if (partitionSplit.containsKey(column.getName())) {
-                continue; // Ignore constraints on partition name as RDBMS does not contain these as columns. Presto will filter these values.
-            }
-            ArrowType type = column.getType();
-            if (constraints.getSummary() != null && !constraints.getSummary().isEmpty()) {
-                ValueSet valueSet = constraints.getSummary().get(column.getName());
-                if (valueSet != null) {
-                    LOGGER.info("valueSet: ", valueSet);
-                    builder.add(toPredicate(column.getName(), valueSet, type, parameterValues));
-                }
-            }
-        }
-        return builder.build();
-    }
+   private static List<String> toConjuncts(List<Field> columns, Constraints constraints, Map<String, String> partitionSplit, List<QueryParameterValue> parameterValues)
+   {
+       LOGGER.info("Inside toConjuncts(): ");
+       ImmutableList.Builder<String> builder = ImmutableList.builder();
+       for (Field column : columns) {
+           if (partitionSplit.containsKey(column.getName())) {
+               continue; // Ignore constraints on partition name as RDBMS does not contain these as columns. Presto will filter these values.
+           }
+           ArrowType type = column.getType();
+           if (constraints.getSummary() != null && !constraints.getSummary().isEmpty()) {
+               ValueSet valueSet = constraints.getSummary().get(column.getName());
+               if (valueSet != null) {
+                   LOGGER.info("valueSet: ", valueSet);
+                   builder.add(toPredicate(column.getName(), valueSet, type, parameterValues));
+               }
+           }
+       }
+       BigQueryFederationExpressionParser bigQueryFederationExpressionParser = new BigQueryFederationExpressionParser();
+       builder.addAll(bigQueryFederationExpressionParser.parseComplexExpressions(columns, constraints));
+       return builder.build();
+   }
 
     private static String toPredicate(String columnName, ValueSet valueSet, ArrowType type, List<QueryParameterValue> parameterValues)
     {
