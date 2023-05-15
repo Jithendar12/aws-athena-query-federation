@@ -29,6 +29,7 @@ import org.apache.commons.lang3.NotImplementedException;
 
 import java.util.List;
 
+//Based on com.amazonaws.athena.connectors.jdbc.manager.JdbcFederationExpressionParser class
 public class BigQueryFederationExpressionParser extends FederationExpressionParser
 {
 

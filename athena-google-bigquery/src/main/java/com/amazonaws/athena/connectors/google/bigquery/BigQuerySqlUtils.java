@@ -129,7 +129,7 @@ public class BigQuerySqlUtils
 
    private static List<String> toConjuncts(List<Field> columns, Constraints constraints, Map<String, String> partitionSplit, List<QueryParameterValue> parameterValues)
    {
-       LOGGER.info("Inside toConjuncts(): ");
+       LOGGER.debug("Inside toConjuncts(): ");
        ImmutableList.Builder<String> builder = ImmutableList.builder();
        for (Field column : columns) {
            if (partitionSplit.containsKey(column.getName())) {
@@ -144,8 +144,7 @@ public class BigQuerySqlUtils
                }
            }
        }
-       BigQueryFederationExpressionParser bigQueryFederationExpressionParser = new BigQueryFederationExpressionParser();
-       builder.addAll(bigQueryFederationExpressionParser.parseComplexExpressions(columns, constraints));
+       builder.addAll(new BigQueryFederationExpressionParser().parseComplexExpressions(columns, constraints));
        return builder.build();
    }
 
@@ -288,6 +287,7 @@ public class BigQuerySqlUtils
         }
     }
 
+    //Based on com.amazonaws.athena.connectors.jdbc.manager.JdbcSplitQueryBuilder.extractOrderByClause() method
     private static String extractOrderByClause(Constraints constraints)
     {
         List<OrderByField> orderByClause = constraints.getOrderByClause();
