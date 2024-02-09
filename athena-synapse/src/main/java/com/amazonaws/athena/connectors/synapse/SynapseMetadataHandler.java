@@ -356,53 +356,68 @@ public class SynapseMetadataHandler extends JdbcMetadataHandler
                 throw new UnsupportedOperationException("Query not supported: ResultSetMetaData not available for query: " + customerPassedQuery);
             }
             SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
+            if ("azureServerless".equalsIgnoreCase(SynapseUtil.checkEnvironment(connection.getMetaData().getURL()))) {
+                HashMap<String, List<String>> columnNameAndDataTypeMap = new HashMap<>();
+                for (int columnIndex = 1; columnIndex <= metadata.getColumnCount(); columnIndex++) {
+                        List<String> columnDetails = com.google.common.collect.ImmutableList.of(
+                                metadata.getColumnTypeName(columnIndex),
+                                String.valueOf(metadata.getPrecision(columnIndex)),
+                                String.valueOf(metadata.getScale(columnIndex)));
+                        columnNameAndDataTypeMap.put(metadata.getColumnName(columnIndex), columnDetails);
 
-            for (int columnIndex = 1; columnIndex <= metadata.getColumnCount(); columnIndex++) {
-                String columnName = metadata.getColumnName(columnIndex);
-                String columnLabel = metadata.getColumnLabel(columnIndex);
-                //todo; is there a mechanism to pass both back to the engine?
-                columnName = columnName.equals(columnLabel) ? columnName : columnLabel;
-
-                int precision = metadata.getPrecision(columnIndex);
-                int scale = metadata.getScale(columnIndex);
-
-                ArrowType columnType = JdbcArrowTypeConverter.toArrowType(
-                        metadata.getColumnType(columnIndex),
-                        precision,
-                        scale,
-                        configOptions);
-                String dataType = metadata.getColumnTypeName(columnIndex);
-                final Map<String, ArrowType> stringArrowTypeMap = Map.ofEntries(
-                        entry("BIT", Types.MinorType.TINYINT.getType()),
-                        entry("TINYINT", Types.MinorType.SMALLINT.getType()),
-                        entry("NUMERIC", Types.MinorType.FLOAT8.getType()),
-                        entry("SMALLMONEY", Types.MinorType.FLOAT8.getType()),
-                        entry("DATE", Types.MinorType.DATEDAY.getType()),
-                        entry("DATETIME", Types.MinorType.DATEMILLI.getType()),
-                        entry("DATETIME2", Types.MinorType.DATEMILLI.getType()),
-                        entry("SMALLDATETIME", Types.MinorType.DATEMILLI.getType()),
-                        entry("DATETIMEOFFSET", Types.MinorType.DATEMILLI.getType())
-                );
-                if (dataType != null && stringArrowTypeMap.containsKey(dataType.toUpperCase())) {
-                    columnType = stringArrowTypeMap.get(dataType.toUpperCase());
                 }
+                schemaBuilder = doDataTypeConversion(columnNameAndDataTypeMap);
 
-                if (columnType != null && SupportedTypes.isSupported(columnType)) {
-                    if (columnType instanceof ArrowType.List) {
-                        schemaBuilder.addListField(columnName, getArrayArrowTypeFromTypeName(
-                                metadata.getTableName(columnIndex),
-                                metadata.getColumnDisplaySize(columnIndex),
-                                precision));
+            }
+
+            else {
+                for (int columnIndex = 1; columnIndex <= metadata.getColumnCount(); columnIndex++) {
+                    String columnName = metadata.getColumnName(columnIndex);
+                    String columnLabel = metadata.getColumnLabel(columnIndex);
+                    //todo; is there a mechanism to pass both back to the engine?
+                    columnName = columnName.equals(columnLabel) ? columnName : columnLabel;
+
+                    int precision = metadata.getPrecision(columnIndex);
+                    int scale = metadata.getScale(columnIndex);
+
+                    ArrowType columnType = JdbcArrowTypeConverter.toArrowType(
+                            metadata.getColumnType(columnIndex),
+                            precision,
+                            scale,
+                            configOptions);
+                    String dataType = metadata.getColumnTypeName(columnIndex);
+                    final Map<String, ArrowType> stringArrowTypeMap = Map.ofEntries(
+                            entry("BIT", Types.MinorType.TINYINT.getType()),
+                            entry("TINYINT", Types.MinorType.SMALLINT.getType()),
+                            entry("NUMERIC", Types.MinorType.FLOAT8.getType()),
+                            entry("SMALLMONEY", Types.MinorType.FLOAT8.getType()),
+                            entry("DATE", Types.MinorType.DATEDAY.getType()),
+                            entry("DATETIME", Types.MinorType.DATEMILLI.getType()),
+                            entry("DATETIME2", Types.MinorType.DATEMILLI.getType()),
+                            entry("SMALLDATETIME", Types.MinorType.DATEMILLI.getType()),
+                            entry("DATETIMEOFFSET", Types.MinorType.DATEMILLI.getType())
+                    );
+                    if (dataType != null && stringArrowTypeMap.containsKey(dataType.toUpperCase())) {
+                        columnType = stringArrowTypeMap.get(dataType.toUpperCase());
+                    }
+
+                    if (columnType != null && SupportedTypes.isSupported(columnType)) {
+                        if (columnType instanceof ArrowType.List) {
+                            schemaBuilder.addListField(columnName, getArrayArrowTypeFromTypeName(
+                                    metadata.getTableName(columnIndex),
+                                    metadata.getColumnDisplaySize(columnIndex),
+                                    precision));
+                        }
+                        else {
+                            schemaBuilder.addField(FieldBuilder.newBuilder(columnName, columnType).build());
+                        }
                     }
                     else {
-                        schemaBuilder.addField(FieldBuilder.newBuilder(columnName, columnType).build());
+                        // Default to VARCHAR ArrowType
+                        LOGGER.warn("getSchema: Unable to map type for column[" + columnName +
+                                "] to a supported type, attempted " + columnType + " - defaulting type to VARCHAR.");
+                        schemaBuilder.addField(FieldBuilder.newBuilder(columnName, new ArrowType.Utf8()).build());
                     }
-                }
-                else {
-                    // Default to VARCHAR ArrowType
-                    LOGGER.warn("getSchema: Unable to map type for column[" + columnName +
-                            "] to a supported type, attempted " + columnType + " - defaulting type to VARCHAR.");
-                    schemaBuilder.addField(FieldBuilder.newBuilder(columnName, new ArrowType.Utf8()).build());
                 }
             }
 
@@ -452,7 +467,7 @@ public class SynapseMetadataHandler extends JdbcMetadataHandler
         if ("azureServerless".equalsIgnoreCase(SynapseUtil.checkEnvironment(jdbcConnection.getMetaData().getURL()))) {
             // getColumns() method from SQL Server driver is causing an exception in case of Azure Serverless environment.
             // so doing explicit data type conversion
-            schemaBuilder = doDataTypeConversion(columnNameAndDataTypeMap, tableName.getSchemaName());
+            schemaBuilder = doDataTypeConversion(columnNameAndDataTypeMap);
         }
         else {
             schemaBuilder = doDataTypeConversionForNonCompatible(jdbcConnection, tableName, columnNameAndDataTypeMap);
@@ -462,7 +477,7 @@ public class SynapseMetadataHandler extends JdbcMetadataHandler
         return schemaBuilder.build();
     }
 
-    private SchemaBuilder doDataTypeConversion(HashMap<String, List<String>> columnNameAndDataTypeMap, String schemaName)
+    private SchemaBuilder doDataTypeConversion(HashMap<String, List<String>> columnNameAndDataTypeMap)
     {
         SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
 
