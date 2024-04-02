@@ -255,7 +255,7 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
         String queryId = request.getQueryId().replace("-", "");
 
         // Get the SQL statement which was created in getPartitions
-        FieldReader fieldReaderPS = request.getPartitions().getFieldReader("preparedStmt");
+        FieldReader fieldReaderPS = request.getPartitions().getFieldReader("copySql");
         String copySql = fieldReaderPS.readText().toString();
         String catalogName = request.getCatalogName();
 
