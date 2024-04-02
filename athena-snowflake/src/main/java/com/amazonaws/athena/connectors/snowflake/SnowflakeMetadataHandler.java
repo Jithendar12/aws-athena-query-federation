@@ -1,4 +1,3 @@
-
 /*-
  * #%L
  * athena-snowflake
@@ -21,6 +20,7 @@
 
 package com.amazonaws.athena.connectors.snowflake;
 
+import com.amazonaws.SdkClientException;
 import com.amazonaws.athena.connector.lambda.QueryStatusChecker;
 import com.amazonaws.athena.connector.lambda.data.Block;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
@@ -30,8 +30,8 @@ import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.data.SupportedTypes;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
+import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
 import com.amazonaws.athena.connector.lambda.domain.predicate.functions.StandardFunctions;
-import com.amazonaws.athena.connector.lambda.domain.spill.SpillLocation;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesResponse;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsRequest;
@@ -55,7 +55,14 @@ import com.amazonaws.athena.connectors.jdbc.manager.JDBCUtil;
 import com.amazonaws.athena.connectors.jdbc.manager.JdbcArrowTypeConverter;
 import com.amazonaws.athena.connectors.jdbc.manager.JdbcMetadataHandler;
 import com.amazonaws.athena.connectors.jdbc.manager.PreparedStatementBuilder;
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
 import com.amazonaws.services.athena.AmazonAthena;
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.amazonaws.services.s3.model.ListObjectsRequest;
+import com.amazonaws.services.s3.model.ObjectListing;
+import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.amazonaws.services.secretsmanager.AWSSecretsManager;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
@@ -65,6 +72,7 @@ import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,10 +87,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static com.amazonaws.athena.connectors.snowflake.SnowflakeConstants.MAX_PARTITION_COUNT;
-import static com.amazonaws.athena.connectors.snowflake.SnowflakeConstants.SINGLE_SPLIT_LIMIT_COUNT;
+import static com.amazonaws.athena.connectors.snowflake.SnowflakeConstants.SNOWFLAKE_QUOTE_CHARACTER;
+
 
 /**
  * Handles metadata for Snowflake. User must have access to `schemata`, `tables`, `columns` in
@@ -93,23 +102,15 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
     static final Map<String, String> JDBC_PROPERTIES = ImmutableMap.of("databaseTerm", "SCHEMA");
     static final String BLOCK_PARTITION_COLUMN_NAME = "partition";
     private static final Logger LOGGER = LoggerFactory.getLogger(SnowflakeMetadataHandler.class);
-    private static final int MAX_SPLITS_PER_REQUEST = 1000_000;
     private static final String COLUMN_NAME = "COLUMN_NAME";
-    /**
-     * fetching number of records in the table
-     */
-    static final String COUNT_RECORDS_QUERY = "SELECT row_count\n" +
-            "FROM   information_schema.tables\n" +
-            "WHERE  table_type = 'BASE TABLE'\n" +
-            "AND table_schema= ?\n" +
-            "AND TABLE_NAME = ? ";
+    private static final String EXPORT_BUCKET_KEY = "export_bucket";
+    private static final String EXTERNAL_STAGE_NAME = "externalS3Stage";
+    private static final String EMPTY_STRING = StringUtils.EMPTY;
+    SnowflakeQueryStringBuilder snowflakeQueryStringBuilder = new SnowflakeQueryStringBuilder(SNOWFLAKE_QUOTE_CHARACTER, new SnowflakeFederationExpressionParser(SNOWFLAKE_QUOTE_CHARACTER));
+
     private static final String CASE_UPPER = "upper";
     private static final String CASE_LOWER = "lower";
-    /**
-     * Query to check view
-     */
-    static final String VIEW_CHECK_QUERY = "SELECT * FROM information_schema.views WHERE table_schema = ? AND table_name = ?";
-    static final String ALL_PARTITIONS = "*";
+
     /**
      * Instantiates handler to be used by Lambda function directly.
      *
@@ -178,135 +179,201 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
                 .addField(BLOCK_PARTITION_COLUMN_NAME, Types.MinorType.VARCHAR.getType());
         return schemaBuilder.build();
     }
+
     /**
-     * Snowflake manual partition logic based upon number of records
-     * @param blockWriter
-     * @param getTableLayoutRequest
-     * @param queryStatusChecker
-     * @throws Exception
+     * Here we inject the additional column to hold the Prepared SQL Statement.
+     *
+     * @param partitionSchemaBuilder The SchemaBuilder you can use to add additional columns and metadata to the
+     * partitions response.
+     * @param request The GetTableLayoutResquest that triggered this call.
      */
     @Override
-    public void getPartitions(BlockWriter blockWriter, GetTableLayoutRequest getTableLayoutRequest,
-                              QueryStatusChecker queryStatusChecker) throws Exception
-    {
-        LOGGER.info("{}: Schema {}, table {}", getTableLayoutRequest.getQueryId(), getTableLayoutRequest.getTableName().getSchemaName(),
-                getTableLayoutRequest.getTableName().getTableName());
-        /**
-         * "MAX_PARTITION_COUNT" is currently set to 50 to limit the number of partitions.
-         * this is to handle timeout issues because of huge partitions
-         */
-        LOGGER.info(" Total Partition Limit" + MAX_PARTITION_COUNT);
-        boolean viewFlag = checkForView(getTableLayoutRequest);
-        //if the input table is a view , there will be single split
-        if (viewFlag) {
-            blockWriter.writeRows((Block block, int rowNum) -> {
-                block.setValue(BLOCK_PARTITION_COLUMN_NAME, rowNum, ALL_PARTITIONS);
-                return 1;
-            });
-        }
-        else {
-            double totalRecordCount = 0;
-            LOGGER.info(COUNT_RECORDS_QUERY);
-            List<String> parameters = Arrays.asList(getTableLayoutRequest.getTableName().getSchemaName(), getTableLayoutRequest.getTableName().getTableName());
+    public void enhancePartitionSchema(SchemaBuilder partitionSchemaBuilder, GetTableLayoutRequest request) {
 
-            try (Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider());
-                 PreparedStatement preparedStatement = new PreparedStatementBuilder().withConnection(connection)
-                         .withQuery(COUNT_RECORDS_QUERY).withParameters(parameters).build();
-                 ResultSet rs = preparedStatement.executeQuery()) {
-                while (rs.next()) {
-                    totalRecordCount = rs.getLong(1);
-                }
-                if (totalRecordCount > 0) {
-                    long pageCount = (long) (Math.ceil(totalRecordCount / MAX_PARTITION_COUNT));
-                    long partitionRecordCount = (totalRecordCount <= SINGLE_SPLIT_LIMIT_COUNT) ? (long) totalRecordCount : pageCount;
-                    LOGGER.info(" Total Page  Count" +  partitionRecordCount);
-                    double limit = (int) Math.ceil(totalRecordCount / partitionRecordCount);
-                    long offset = 0;
-                    /**
-                     * Custom pagination based partition logic will be applied with limit and offset clauses.
-                     * It will have maximum 50 partitions and number of records in each partition is decided by dividing total number of records by 50
-                     * the partition values we are setting the limit and offset values like p-limit-3000-offset-0
-                     */
-                    for (int i = 1; i <= limit; i++) {
-                        final String partitionVal = BLOCK_PARTITION_COLUMN_NAME + "-limit-" + partitionRecordCount + "-offset-" + offset;
-                        LOGGER.info("partitionVal {} ", partitionVal);
-                        blockWriter.writeRows((Block block, int rowNum) ->
-                        {
-                            block.setValue(BLOCK_PARTITION_COLUMN_NAME, rowNum, partitionVal);
-                            return 1;
-                        });
-                        offset = offset + partitionRecordCount;
+        LOGGER.info("{}: Catalog {}, table {}", request.getQueryId(), request.getTableName().getSchemaName(), request.getTableName());
+        partitionSchemaBuilder.addField("copySql", new ArrowType.Utf8());
+        partitionSchemaBuilder.addField("queryId", new ArrowType.Utf8());
+        partitionSchemaBuilder.addField("createStageSql", new ArrowType.Utf8());
+    }
+
+    /**
+     * Used to get the partitions that must be read from the request table in order to satisfy the requested predicate.
+     * Here generating the SQL from the request and attaching it as a additional column
+     *
+     * @param blockWriter Used to write rows (partitions) into the Apache Arrow response.
+     * @param request Provides details of the catalog, database, and table being queried as well as any filter predicate.
+     * @param queryStatusChecker A QueryStatusChecker that you can use to stop doing work for a query that has already terminated
+     */
+    @Override
+    public void getPartitions(BlockWriter blockWriter, GetTableLayoutRequest request, QueryStatusChecker queryStatusChecker) throws Exception {
+        LOGGER.info("in getPartitions: ", request);
+        AWSCredentials credentials = new DefaultAWSCredentialsProviderChain().getCredentials();
+        String catalog = request.getCatalogName();
+        Schema schemaName = request.getSchema();
+        TableName tableName = request.getTableName();
+        Constraints constraints  = request.getConstraints();
+        LOGGER.info("catlogName, schemaName, tableName: ", request.getCatalogName(), tableName.getSchemaName(), tableName.getTableName());
+        //get the bucket where export results wll be uploaded
+        String s3ExportBucket = getS3ExportBucket();
+        //Appending a random int to the query id to support multiple federated queries within a single query
+
+        String randomStr = UUID.randomUUID().toString();
+        String queryID = request.getQueryId().replace("-","").concat(randomStr);
+
+        //Build the SQL query
+        Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider());
+        String createStageSql ="CREATE OR REPLACE STAGE ATHENA_DEV.ATHENA.AFQS3STAGE" +
+        " URL = 's3://" +s3ExportBucket+ "/" + queryID + "' " +
+                "CREDENTIALS = (AWS_KEY_ID = 'xxxx' , " +
+                "AWS_SECRET_KEY = 'yyyy') " +
+                "FILE_FORMAT = (TYPE = 'PARQUET')";
+
+        String generatedSql = snowflakeQueryStringBuilder.buildSqlString(connection, catalog, tableName.getSchemaName(), tableName.getTableName(), schemaName, constraints, null);
+        String copySqlBuilder = "COPY INTO @ATHENA_DEV.ATHENA.AFQS3STAGE" + " FROM (" + generatedSql + " ) overwrite = true FILE_FORMAT = (" + "TYPE = 'PARQUET'," + " COMPRESSION = 'NONE') HEADER = TRUE MAX_FILE_SIZE = 15000000 ";
+
+        LOGGER.info("Snowflake CreateStageSql Statement: {}" , createStageSql);
+        LOGGER.info("Snowflake Copy Statement: {}" , copySqlBuilder);
+        LOGGER.info("queryID: {}" , queryID);
+
+
+        // write the prepared SQL statement to the partition column created in enhancePartitionSchema
+        blockWriter.writeRows((Block block, int rowNum) ->{
+            boolean matched;
+            matched = block.setValue("copySql", rowNum, copySqlBuilder);
+            matched &= block.setValue("queryId", rowNum, queryID);
+            matched &= block.setValue("createStageSql", rowNum, createStageSql);
+            //If all fields matches then we wrote 1 row during this call so we return 1
+            return matched ? 1 : 0;
+        });
+
+    }
+
+    @Override
+    public GetSplitsResponse doGetSplits(BlockAllocator allocator, GetSplitsRequest request) {
+        Set<Split> splits = new HashSet<>();
+        String exportBucket = getS3ExportBucket();
+        String queryId = request.getQueryId().replace("-", "");
+
+        // Get the SQL statement which was created in getPartitions
+        FieldReader fieldReaderPS = request.getPartitions().getFieldReader("preparedStmt");
+        String copySql = fieldReaderPS.readText().toString();
+        String catalogName = request.getCatalogName();
+
+        FieldReader fieldReaderQid = request.getPartitions().getFieldReader("queryId");
+        String queryID = fieldReaderQid.readText().toString();
+
+        FieldReader fieldReaderAwsRegion = request.getPartitions().getFieldReader("createStageSql");
+        String createStageSql = fieldReaderAwsRegion.readText().toString();
+
+        try (Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider());
+             PreparedStatement preparedStatement = new PreparedStatementBuilder()
+                     .withConnection(connection)
+                     .withQuery(createStageSql)
+                     .withParameters(Arrays.asList(request.getTableName().getSchemaName() + "." +
+                             request.getTableName().getTableName()))
+                     .build();
+             PreparedStatement preparedStatement2 = new PreparedStatementBuilder()
+                     .withConnection(connection)
+                     .withQuery(copySql)
+                     .withParameters(Arrays.asList(request.getTableName().getSchemaName() + "." +
+                             request.getTableName().getTableName()))
+                     .build()) {
+
+            preparedStatement.executeUpdate();
+            Thread.sleep(1000);
+            preparedStatement2.execute();
+            String recentSfQueryId= null;
+            try (PreparedStatement preparedStatement3 = connection.prepareStatement("SELECT LAST_QUERY_ID()")) {
+                try (ResultSet resultSet = preparedStatement3.executeQuery()) {
+                    if (resultSet.next()) {
+                        recentSfQueryId = resultSet.getString(1);
                     }
                 }
-                else {
-                    LOGGER.info("No Records Found for table {}", getTableLayoutRequest.getTableName().getTableName());
+            }
+            if (recentSfQueryId != null) {
+                int maxSleep = 3600000; // sleep maximum of 10 minutes for unload data from snowflake to s3
+
+                // Wait until the query is finished
+                while (maxSleep > 0) {
+                    Thread.sleep(5000); // Wait for 5 seconds
+
+                    // Check the status of the query using its ID
+                    String queryStatus = getQueryStatus(connection, recentSfQueryId);
+                    if (queryStatus.equalsIgnoreCase("success")) {
+                        break;
+                    }
+                    maxSleep -= 5000;
                 }
             }
+
+            /*
+             * For each generated S3 object, create a split and add data to the split.
+             */
+            List<S3ObjectSummary> s3ObjectSummaries = getlistExportedObjects(exportBucket, queryId);
+
+            if (!s3ObjectSummaries.isEmpty()) {
+                for (S3ObjectSummary objectSummary : s3ObjectSummaries) {
+                    Split split = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
+                            .add("query_id", queryID)
+                            .add("exportBucket", exportBucket)
+                            .add("s3ObjectKey", objectSummary.getKey())
+                            .build();
+                    splits.add(split);
+                }
+                LOGGER.info("doGetSplits: exit - " , splits.size());
+                return new GetSplitsResponse(catalogName, splits);
+            } else {
+                // No records were exported by Snowflake for the issued query, creating an "empty" split
+                LOGGER.info("No records were exported by Snowflake");
+                Split split = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
+                        .add("query_id", queryID)
+                        .add("exportBucket", exportBucket)
+                        .add("s3ObjectKey", EMPTY_STRING)
+                        .build();
+                splits.add(split);
+                LOGGER.info("doGetSplits: exit - " , splits.size());
+                return new GetSplitsResponse(catalogName, split);
+            }
+
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        } catch (Exception e) {
+            e.printStackTrace();
         }
+
+        return null;
     }
 
-    /**
-     * Check if the input table is a view and returns viewflag accordingly
-     * @param getTableLayoutRequest
-     * @return
-     * @throws Exception
-     */
-    private boolean checkForView(GetTableLayoutRequest getTableLayoutRequest) throws Exception
-    {
-        boolean viewFlag = false;
-        List<String> viewparameters = Arrays.asList(getTableLayoutRequest.getTableName().getSchemaName(), getTableLayoutRequest.getTableName().getTableName());
-        try (Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider())) {
-            try (PreparedStatement preparedStatement = new PreparedStatementBuilder().withConnection(connection).withQuery(VIEW_CHECK_QUERY).withParameters(viewparameters).build();
-                 ResultSet resultSet = preparedStatement.executeQuery()) {
+    private static String getQueryStatus(Connection connection, String queryId) throws SQLException {
+        String queryStatus = null;
+        String query = "SELECT EXECUTION_STATUS FROM table(information_schema.query_history()) WHERE query_id = ?";
+        try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+            preparedStatement.setString(1, queryId);
+            try (ResultSet resultSet = preparedStatement.executeQuery()) {
                 if (resultSet.next()) {
-                    viewFlag = true;
+                    queryStatus = resultSet.getString(1);
                 }
-                LOGGER.info("viewFlag: {}", viewFlag);
             }
         }
-        return viewFlag;
+        return queryStatus;
     }
 
-    @Override
-    public GetSplitsResponse doGetSplits(BlockAllocator blockAllocator, GetSplitsRequest getSplitsRequest)
-    {
-        LOGGER.info("{}: Catalog {}, table {}", getSplitsRequest.getQueryId(), getSplitsRequest.getTableName().getSchemaName(), getSplitsRequest.getTableName().getTableName());
-        if (getSplitsRequest.getConstraints().isQueryPassThrough()) {
-            LOGGER.info("QPT Split Requested");
-            return setupQueryPassthroughSplit(getSplitsRequest);
-        }
-        int partitionContd = decodeContinuationToken(getSplitsRequest);
-        Set<Split> splits = new HashSet<>();
-        Block partitions = getSplitsRequest.getPartitions();
-        // TODO consider splitting further depending on #rows or data size. Could use Hash key for splitting if no partitions.
-        for (int curPartition = partitionContd; curPartition < partitions.getRowCount(); curPartition++) {
-            FieldReader locationReader = partitions.getFieldReader(BLOCK_PARTITION_COLUMN_NAME);
-            locationReader.setPosition(curPartition);
-            SpillLocation spillLocation = makeSpillLocation(getSplitsRequest);
-            LOGGER.info("{}: Input partition is {}", getSplitsRequest.getQueryId(), locationReader.readText());
-            Split.Builder splitBuilder = Split.newBuilder(spillLocation, makeEncryptionKey())
-                    .add(BLOCK_PARTITION_COLUMN_NAME, String.valueOf(locationReader.readText()));
-            splits.add(splitBuilder.build());
-            if (splits.size() >= MAX_SPLITS_PER_REQUEST) {
-                //We exceeded the number of split we want to return in a single request, return and provide a continuation token.
-                return new GetSplitsResponse(getSplitsRequest.getCatalogName(), splits, encodeContinuationToken(curPartition + 1));
-            }
-        }
-        return new GetSplitsResponse(getSplitsRequest.getCatalogName(), splits, null);
-    }
 
-    private int decodeContinuationToken(GetSplitsRequest request)
-    {
-        if (request.hasContinuationToken()) {
-            return Integer.parseInt(request.getContinuationToken());
+    /*
+     * Get the list of all the exported S3 objects
+     */
+    private List<S3ObjectSummary> getlistExportedObjects(String s3ExportBucket, String queryId){
+        AmazonS3 amazonS3 = AmazonS3ClientBuilder.defaultClient();
+        ObjectListing objectListing;
+        try
+        {
+            objectListing = amazonS3.listObjects(new ListObjectsRequest().withBucketName(s3ExportBucket).withPrefix(queryId));
         }
-        //No continuation token present
-        return 0;
-    }
-
-    private String encodeContinuationToken(int partition)
-    {
-        return String.valueOf(partition);
+        catch (SdkClientException e)
+        {
+            throw new RuntimeException("Exception listing the exported objects : " + e.getMessage(), e);
+        }
+        return objectListing.getObjectSummaries();
     }
 
     @Override
@@ -534,5 +601,10 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
             }
             return schemaNames.build();
         }
+    }
+
+    public String getS3ExportBucket()
+    {
+        return configOptions.get(EXPORT_BUCKET_KEY);
     }
 }

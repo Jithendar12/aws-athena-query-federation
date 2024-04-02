@@ -228,7 +228,7 @@ public abstract class JdbcSplitQueryBuilder
 
     protected abstract List<String> getPartitionWhereClauses(final Split split);
 
-    private List<String> toConjuncts(List<Field> columns, Constraints constraints, List<TypeAndValue> accumulator, Map<String, String> partitionSplit)
+    protected List<String> toConjuncts(List<Field> columns, Constraints constraints, List<TypeAndValue> accumulator, Map<String, String> partitionSplit)
     {
         List<String> conjuncts = new ArrayList<>();
         for (Field column : columns) {
@@ -247,7 +247,7 @@ public abstract class JdbcSplitQueryBuilder
         return conjuncts;
     }
 
-    private String toPredicate(String columnName, ValueSet valueSet, ArrowType type, List<TypeAndValue> accumulator)
+    protected String toPredicate(String columnName, ValueSet valueSet, ArrowType type, List<TypeAndValue> accumulator)
     {
         List<String> disjuncts = new ArrayList<>();
         List<Object> singleValues = new ArrayList<>();
@@ -339,7 +339,6 @@ public abstract class JdbcSplitQueryBuilder
 
     protected String appendLimitOffset(Split split)
     {
-        // keeping this method for connectors that still override this (SAP Hana + Snowflake)
         return emptyString;
     }
 

@@ -26,6 +26,9 @@ Parameters:
   SpillBucket:
     Description: 'The name of the bucket where this function can spill data.'
     Type: String
+  SnowflakeExportBucket:
+    Description: "The bucket where the Snowflake Query results will be exported."
+    Type: String
   SpillPrefix:
     Description: 'The prefix within SpillBucket where this function can spill data.'
     Type: String
@@ -67,6 +70,7 @@ Resources:
           disable_spill_encryption: !Ref DisableSpillEncryption
           spill_bucket: !Ref SpillBucket
           spill_prefix: !Ref SpillPrefix
+          export_bucket: !Ref SnowflakeExportBucket
           default: !Ref DefaultConnectionString
       FunctionName: !Ref LambdaFunctionName
       Handler: "com.amazonaws.athena.connectors.snowflake.SnowflakeMuxCompositeHandler"
@@ -107,6 +111,8 @@ Resources:
         #with one that is more restrictive and can only 'put' but not read,delete, or overwrite files.
         - S3CrudPolicy:
             BucketName: !Ref SpillBucket
+        - S3CrudPolicy:
+            BucketName: !Ref SnowflakeExportBucket
         #VPCAccessPolicy allows our connector to run in a VPC so that it can access your data source.
         - VPCAccessPolicy: {}
       VpcConfig:

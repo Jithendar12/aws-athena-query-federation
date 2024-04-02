@@ -1,5 +1,3 @@
-
-
 /*-
  * #%L
  * athena-snowflake
