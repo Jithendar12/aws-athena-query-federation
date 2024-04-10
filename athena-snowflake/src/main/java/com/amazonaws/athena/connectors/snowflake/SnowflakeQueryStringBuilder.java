@@ -144,6 +144,7 @@ public class SnowflakeQueryStringBuilder
                     conjuncts.add(toPredicate(column.getName(), valueSet, type, accumulator));
                 }
             }
-        }return conjuncts;
+        }
+        return conjuncts;
     }
 }

@@ -23,7 +23,6 @@ package com.amazonaws.athena.connectors.snowflake;
 import com.amazonaws.athena.connector.lambda.QueryStatusChecker;
 import com.amazonaws.athena.connector.lambda.data.Block;
 import com.amazonaws.athena.connector.lambda.data.BlockSpiller;
-import com.amazonaws.athena.connector.lambda.data.BlockUtils;
 import com.amazonaws.athena.connector.lambda.data.writers.GeneratedRowWriter;
 import com.amazonaws.athena.connector.lambda.data.writers.extractors.BigIntExtractor;
 import com.amazonaws.athena.connector.lambda.data.writers.extractors.BitExtractor;
@@ -91,13 +90,10 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.text.DecimalFormat;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
-import java.util.Map;
 
 import static com.amazonaws.athena.connectors.snowflake.SnowflakeConstants.SNOWFLAKE_QUOTE_CHARACTER;
 
@@ -157,7 +153,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
     public void readWithConstraint(BlockSpiller spiller, ReadRecordsRequest recordsRequest, QueryStatusChecker queryStatusChecker)
             throws IOException
     {
-        LOGGER.info("readWithConstraint: schema[{}] tableName[{}]" , recordsRequest.getSchema()  , recordsRequest.getTableName());
+        LOGGER.info("readWithConstraint: schema[{}] tableName[{}]", recordsRequest.getSchema(), recordsRequest.getTableName());
         AmazonS3 amazonS3 = AmazonS3ClientBuilder.defaultClient();
         Schema schemaName = recordsRequest.getSchema();
         Split split = recordsRequest.getSplit();
@@ -165,7 +161,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
         String exportBucket = split.getProperty("exportBucket");
         String s3ObjectKey = split.getProperty("s3ObjectKey");
 
-        if(!s3ObjectKey.isEmpty()) {
+        if (!s3ObjectKey.isEmpty()) {
             //get column name and type from the Schema
             HashMap<String, Types.MinorType> mapOfNamesAndTypes = new HashMap<>();
             HashMap<String, Object> mapOfCols = new HashMap<>();
@@ -207,7 +203,8 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                     //Passing the RowContext to BlockWriter;
                     spiller.writeRows((Block block, int rowNum) -> rowWriter.writeRow(block, rowNum, rowContext) ? 1 : 0);
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 throw new RuntimeException("Error in connecting to S3 and selecting the object content for object : " + s3ObjectKey, e);
             }
         }
@@ -221,14 +218,12 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
     {
         String fieldName = field.getName();
         Types.MinorType fieldType = mapOfNamesAndTypes.get(fieldName);
-        switch (fieldType)
-        {
+        switch (fieldType) {
             case BIT:
                 return (BitExtractor) (Object context, NullableBitHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null)
-                    {
+                    if (value == null) {
                         dst.isSet = 0;
                     }
                     else {
@@ -240,8 +235,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (TinyIntExtractor) (Object context, NullableTinyIntHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null)
-                    {
+                    if (value == null) {
                         dst.isSet = 0;
                     }
                     else {
@@ -253,11 +247,10 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (SmallIntExtractor) (Object context, NullableSmallIntHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null)
-                    {
+                    if (value == null) {
                         dst.isSet = 0;
                     }
-                    else{
+                    else {
                         dst.value = Short.parseShort(value.toString());
                         dst.isSet = 1;
                     }
@@ -267,7 +260,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (BigIntExtractor) (Object context, NullableBigIntHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null){
+                    if (value == null) {
                         dst.isSet = 0;
                     }
                     else {
@@ -280,7 +273,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (Float4Extractor) (Object context, NullableFloat4Holder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null){
+                    if (value == null) {
                         dst.isSet = 0;
                     }
                     else {
@@ -292,7 +285,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (Float8Extractor) (Object context, NullableFloat8Holder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null){
+                    if (value == null) {
                         dst.isSet = 0;
                     }
                     else {
@@ -304,8 +297,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (DecimalExtractor) (Object context, NullableDecimalHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null)
-                    {
+                    if (value == null) {
                         dst.isSet = 0;
                     }
                     else {
@@ -318,10 +310,10 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (DateDayExtractor) (Object context, NullableDateDayHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null){
+                    if (value == null) {
                         dst.isSet = 0;
                     }
-                    else{
+                    else {
                         dst.isSet = 1;
                         dst.value = (int) LocalDate.parse(value.toString()).toEpochDay();
                     }
@@ -332,8 +324,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (DateMilliExtractor) (Object context, NullableDateMilliHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName).toString();
-                    if(value == null)
-                    {
+                    if (value == null) {
                         dst.isSet = 0;
                     }
                     else {
@@ -347,11 +338,10 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (VarCharExtractor) (Object context, NullableVarCharHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName);
-                    if(value == null)
-                    {
+                    if (value == null) {
                         dst.isSet = 0;
                     }
-                    else{
+                    else {
                         dst.value = value.toString();
                         dst.isSet = 1;
                     }
@@ -360,8 +350,7 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
                 return (VarBinaryExtractor) (Object context, NullableVarBinaryHolder dst) ->
                 {
                     Object value = ((RowContext) context).getNameValue().get(fieldName).toString();
-                    if(value == null)
-                    {
+                    if (value == null) {
                         dst.isSet = 0;
                     }
                     else {
@@ -380,14 +369,17 @@ public class SnowflakeRecordHandler extends JdbcRecordHandler
         private final String queryId;
         private HashMap<String, Object> nameValue;
 
-        public RowContext(String queryId){
+        public RowContext(String queryId)
+        {
             this.queryId = queryId;
         }
 
-        public void setNameValue(HashMap<String, Object> map){
+        public void setNameValue(HashMap<String, Object> map)
+        {
             this.nameValue = map;
         }
-        public HashMap<String, Object> getNameValue() {
+        public HashMap<String, Object> getNameValue()
+        {
             return this.nameValue;
         }
     }

@@ -188,8 +188,8 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
      * @param request The GetTableLayoutResquest that triggered this call.
      */
     @Override
-    public void enhancePartitionSchema(SchemaBuilder partitionSchemaBuilder, GetTableLayoutRequest request) {
-
+    public void enhancePartitionSchema(SchemaBuilder partitionSchemaBuilder, GetTableLayoutRequest request)
+    {
         LOGGER.info("{}: Catalog {}, table {}", request.getQueryId(), request.getTableName().getSchemaName(), request.getTableName());
         partitionSchemaBuilder.addField("copySql", new ArrowType.Utf8());
         partitionSchemaBuilder.addField("queryId", new ArrowType.Utf8());
@@ -205,7 +205,8 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
      * @param queryStatusChecker A QueryStatusChecker that you can use to stop doing work for a query that has already terminated
      */
     @Override
-    public void getPartitions(BlockWriter blockWriter, GetTableLayoutRequest request, QueryStatusChecker queryStatusChecker) throws Exception {
+    public void getPartitions(BlockWriter blockWriter, GetTableLayoutRequest request, QueryStatusChecker queryStatusChecker) throws Exception
+    {
         LOGGER.info("in getPartitions: ", request);
         AWSCredentials credentials = new DefaultAWSCredentialsProviderChain().getCredentials();
         String catalog = request.getCatalogName();
@@ -218,12 +219,12 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
         //Appending a random int to the query id to support multiple federated queries within a single query
 
         String randomStr = UUID.randomUUID().toString();
-        String queryID = request.getQueryId().replace("-","").concat(randomStr);
+        String queryID = request.getQueryId().replace("-", "").concat(randomStr);
 
         //Build the SQL query
         Connection connection = getJdbcConnectionFactory().getConnection(getCredentialProvider());
-        String createStageSql ="CREATE OR REPLACE STAGE ATHENA_DEV.ATHENA.AFQS3STAGE" +
-        " URL = 's3://" +s3ExportBucket+ "/" + queryID + "' " +
+        String createStageSql = "CREATE OR REPLACE STAGE ATHENA_DEV.ATHENA.AFQS3STAGE" +
+        " URL = 's3://" + s3ExportBucket + "/" + queryID + "' " +
                 "CREDENTIALS = (AWS_KEY_ID = 'xxxx' , " +
                 "AWS_SECRET_KEY = 'yyyy') " +
                 "FILE_FORMAT = (TYPE = 'PARQUET')";
@@ -231,13 +232,13 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
         String generatedSql = snowflakeQueryStringBuilder.buildSqlString(connection, catalog, tableName.getSchemaName(), tableName.getTableName(), schemaName, constraints, null);
         String copySqlBuilder = "COPY INTO @ATHENA_DEV.ATHENA.AFQS3STAGE" + " FROM (" + generatedSql + " ) overwrite = true FILE_FORMAT = (" + "TYPE = 'PARQUET'," + " COMPRESSION = 'NONE') HEADER = TRUE MAX_FILE_SIZE = 15000000 ";
 
-        LOGGER.info("Snowflake CreateStageSql Statement: {}" , createStageSql);
-        LOGGER.info("Snowflake Copy Statement: {}" , copySqlBuilder);
-        LOGGER.info("queryID: {}" , queryID);
+        LOGGER.info("Snowflake CreateStageSql Statement: {}", createStageSql);
+        LOGGER.info("Snowflake Copy Statement: {}", copySqlBuilder);
+        LOGGER.info("queryID: {}", queryID);
 
 
         // write the prepared SQL statement to the partition column created in enhancePartitionSchema
-        blockWriter.writeRows((Block block, int rowNum) ->{
+        blockWriter.writeRows((Block block, int rowNum) -> {
             boolean matched;
             matched = block.setValue("copySql", rowNum, copySqlBuilder);
             matched &= block.setValue("queryId", rowNum, queryID);
@@ -249,7 +250,8 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
     }
 
     @Override
-    public GetSplitsResponse doGetSplits(BlockAllocator allocator, GetSplitsRequest request) {
+    public GetSplitsResponse doGetSplits(BlockAllocator allocator, GetSplitsRequest request)
+    {
         Set<Split> splits = new HashSet<>();
         String exportBucket = getS3ExportBucket();
         String queryId = request.getQueryId().replace("-", "");
@@ -282,7 +284,7 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
             preparedStatement.executeUpdate();
             Thread.sleep(1000);
             preparedStatement2.execute();
-            String recentSfQueryId= null;
+            String recentSfQueryId = null;
             try (PreparedStatement preparedStatement3 = connection.prepareStatement("SELECT LAST_QUERY_ID()")) {
                 try (ResultSet resultSet = preparedStatement3.executeQuery()) {
                     if (resultSet.next()) {
@@ -320,9 +322,10 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
                             .build();
                     splits.add(split);
                 }
-                LOGGER.info("doGetSplits: exit - " , splits.size());
+                LOGGER.info("doGetSplits: exit - ", splits.size());
                 return new GetSplitsResponse(catalogName, splits);
-            } else {
+            }
+            else {
                 // No records were exported by Snowflake for the issued query, creating an "empty" split
                 LOGGER.info("No records were exported by Snowflake");
                 Split split = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
@@ -331,20 +334,22 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
                         .add("s3ObjectKey", EMPTY_STRING)
                         .build();
                 splits.add(split);
-                LOGGER.info("doGetSplits: exit - " , splits.size());
+                LOGGER.info("doGetSplits: exit - ", splits.size());
                 return new GetSplitsResponse(catalogName, split);
             }
 
-        } catch (SQLException throwables) {
+        }
+        catch (SQLException throwables) {
             throwables.printStackTrace();
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             e.printStackTrace();
         }
-
         return null;
     }
 
-    private static String getQueryStatus(Connection connection, String queryId) throws SQLException {
+    private static String getQueryStatus(Connection connection, String queryId) throws SQLException
+    {
         String queryStatus = null;
         String query = "SELECT EXECUTION_STATUS FROM table(information_schema.query_history()) WHERE query_id = ?";
         try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
@@ -362,15 +367,14 @@ public class SnowflakeMetadataHandler extends JdbcMetadataHandler
     /*
      * Get the list of all the exported S3 objects
      */
-    private List<S3ObjectSummary> getlistExportedObjects(String s3ExportBucket, String queryId){
+    private List<S3ObjectSummary> getlistExportedObjects(String s3ExportBucket, String queryId)
+    {
         AmazonS3 amazonS3 = AmazonS3ClientBuilder.defaultClient();
         ObjectListing objectListing;
-        try
-        {
+        try {
             objectListing = amazonS3.listObjects(new ListObjectsRequest().withBucketName(s3ExportBucket).withPrefix(queryId));
         }
-        catch (SdkClientException e)
-        {
+        catch (SdkClientException e) {
             throw new RuntimeException("Exception listing the exported objects : " + e.getMessage(), e);
         }
         return objectListing.getObjectSummaries();
