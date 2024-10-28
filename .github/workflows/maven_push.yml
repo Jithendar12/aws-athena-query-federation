@@ -13,4 +13,7 @@ jobs:
           distribution: 'corretto'
           java-version: '8'
       - name: Build with Maven
-        run: mvn clean install
+        env:
+          AWS_REGION: us-east-1
+          AWS_DEFAULT_REGION: us-east-1
+        run: mvn clean package
