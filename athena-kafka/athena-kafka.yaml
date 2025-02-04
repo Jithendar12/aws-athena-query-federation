@@ -28,10 +28,6 @@ Parameters:
   KafkaEndpoint:
     Description: 'Kafka cluster endpoint'
     Type: String
-  SchemaRegistryUrl:
-    Description: 'Schema Registry URL. Applicable for Avro/Protobuf Formatted Topics. (syntax. http://<endpoint>:<port>)'
-    Type: String
-    Default: ""
   LambdaFunctionName:
     Description: 'This is the name of the lambda function that will be created. This name must satisfy the pattern ^[a-z0-9-_]{1,64}$'
     Type: String

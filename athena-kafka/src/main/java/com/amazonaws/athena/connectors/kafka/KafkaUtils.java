@@ -24,6 +24,10 @@ import com.amazonaws.athena.connectors.kafka.dto.SplitParameters;
 import com.amazonaws.athena.connectors.kafka.dto.TopicResultSet;
 import com.amazonaws.athena.connectors.kafka.serde.KafkaCsvDeserializer;
 import com.amazonaws.athena.connectors.kafka.serde.KafkaJsonDeserializer;
+import com.amazonaws.services.schemaregistry.deserializers.GlueSchemaRegistryKafkaDeserializer;
+import com.amazonaws.services.schemaregistry.utils.AWSSchemaRegistryConstants;
+import com.amazonaws.services.schemaregistry.utils.AvroRecordType;
+import com.amazonaws.services.schemaregistry.utils.ProtobufMessageType;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.DynamicMessage;
@@ -157,16 +161,16 @@ public class KafkaUtils
     public static Consumer<String, GenericRecord> getAvroKafkaConsumer(java.util.Map<String, String> configOptions) throws Exception
     {
         Properties properties = getKafkaProperties(configOptions);
-        properties.setProperty(KAFKA_VALUE_DESERIALIZER_CLASS_CONFIG, io.confluent.kafka.serializers.KafkaAvroDeserializer.class.getName());
-        properties.setProperty(KAFKA_SCHEMA_REGISTRY_URL, getRequiredConfig(KafkaConstants.KAFKA_SCHEMA_REGISTRY_URL, configOptions));
+        properties.put(KAFKA_VALUE_DESERIALIZER_CLASS_CONFIG, GlueSchemaRegistryKafkaDeserializer.class.getName());
+        properties.put(AWSSchemaRegistryConstants.AVRO_RECORD_TYPE, AvroRecordType.GENERIC_RECORD.getName());
         return new KafkaConsumer<>(properties);
     }
 
     public static Consumer<String, DynamicMessage> getProtobufKafkaConsumer(java.util.Map<String, String> configOptions) throws Exception
     {
         Properties properties = getKafkaProperties(configOptions);
-        properties.setProperty(KAFKA_VALUE_DESERIALIZER_CLASS_CONFIG, io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer.class.getName());
-        properties.setProperty(KAFKA_SCHEMA_REGISTRY_URL, getRequiredConfig(KafkaConstants.KAFKA_SCHEMA_REGISTRY_URL, configOptions));
+        properties.put(KAFKA_VALUE_DESERIALIZER_CLASS_CONFIG, GlueSchemaRegistryKafkaDeserializer.class.getName());
+        properties.put(AWSSchemaRegistryConstants.PROTOBUF_MESSAGE_TYPE, ProtobufMessageType.DYNAMIC_MESSAGE.getName());
         return new KafkaConsumer<>(properties);
     }
 

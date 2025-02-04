@@ -345,8 +345,23 @@ public class KafkaRecordHandler
             SplitParameters splitParameters,
             ConsumerRecord<String, GenericRecord> record)
     {
+        LOGGER.debug("Raw record value at offset {}: {}", record.offset(), record.value());
+
+        if (record.value() == null) {
+            LOGGER.debug("Record value is null! Offset: {}", record.offset());
+            throw new NullPointerException("record.value() is null");
+        }
+        if (record.value().getSchema() == null) {
+            LOGGER.debug("Schema is null for record at offset: {}", record.offset());
+            throw new NullPointerException("record.value().getSchema() is null");
+        }
+
         spiller.writeRows((Block block, int rowNum) -> {
             for (Schema.Field next : record.value().getSchema().getFields()) {
+                Object fieldValue = record.value().get(next.name());
+                if (fieldValue == null) {
+                    LOGGER.debug("Field {} is null at offset: {}", next.name(), record.offset());
+                }
                 boolean isMatched = block.offerValue(next.name(), rowNum, record.value().get(next.name()));
                 if (!isMatched) {
                     LOGGER.debug("[FailedToSpill] {} Failed to spill record, offset: {}", splitParameters, record.offset());
