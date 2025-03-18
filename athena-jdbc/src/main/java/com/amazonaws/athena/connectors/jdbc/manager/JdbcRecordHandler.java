@@ -152,6 +152,7 @@ public abstract class JdbcRecordHandler
             if (!CLICKHOUSE_DB.equalsIgnoreCase(databaseProductName)) {
                 connection.setAutoCommit(false); // For consistency. This is needed to be false to enable streaming for some database types.
             }
+            enableCaseSensitivelyLookUpSession(connection); // For certain connectors, we require to apply session config first to enable case
 
             try (PreparedStatement preparedStatement = buildSplitSql(connection, readRecordsRequest.getCatalogName(), readRecordsRequest.getTableName(),
                     readRecordsRequest.getSchema(), readRecordsRequest.getConstraints(), readRecordsRequest.getSplit());
@@ -178,7 +179,7 @@ public abstract class JdbcRecordHandler
                     rowsReturnedFromDatabase++;
                 }
                 LOGGER.info("{} rows returned by database.", rowsReturnedFromDatabase);
-
+                disableCaseSensitivelyLookUpSession(connection); // For certain connectors, we require to apply session config first to enable case
                 // clickhouse does not support commit/rollback, so skip commit() for clickhouse
                 if (!CLICKHOUSE_DB.equalsIgnoreCase(databaseProductName)) {
                     connection.commit();
@@ -204,6 +205,14 @@ public abstract class JdbcRecordHandler
                     }
                     return true;
                 };
+    }
+
+    protected boolean enableCaseSensitivelyLookUpSession(Connection connection) {
+        return false;
+    }
+
+    protected boolean disableCaseSensitivelyLookUpSession(Connection connection) {
+        return false;
     }
 
     /**
