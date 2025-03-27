@@ -25,7 +25,6 @@ import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
 import com.amazonaws.athena.connector.lambda.data.BlockSpiller;
 import com.amazonaws.athena.connector.lambda.data.BlockUtils;
-import com.amazonaws.athena.connector.lambda.data.BlockWriter;
 import com.amazonaws.athena.connector.lambda.data.S3BlockSpillReader;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
@@ -91,23 +90,8 @@ public class RecordHandlerTest
     private Schema schemaForRead;
     private S3BlockSpillReader spillReader;
     private EncryptionKeyFactory keyFactory = new LocalKeyFactory();
-
-    @Mock
-    private SecretsManagerClient secretsManagerClient;
-
-    @Mock
-    private AthenaClient athenaClient;
-
-    @Mock
-    private BlockWriter blockWriter;
-
-    @Mock
-    private QueryStatusChecker queryStatusChecker;
     @Mock
     private S3Client mockS3;
-
-    @Mock
-    private Constraints constraints;
 
     @Before
     public void setUp()
@@ -120,33 +104,12 @@ public class RecordHandlerTest
         configOptions.put("spill_prefix", prefix);
         spillReader = new S3BlockSpillReader(mockS3, blockAllocator);
 
-        /*when(mockS3.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
-                .thenAnswer((InvocationOnMock invocationOnMock) ->
-                {
-                    InputStream inputStream = ((RequestBody) invocationOnMock.getArguments()[1]).contentStreamProvider().newStream();
-                    ByteHolder byteHolder = new ByteHolder();
-                    byteHolder.setBytes(ByteStreams.toByteArray(inputStream));
-                    synchronized (mockS3Storage) {
-                        mockS3Storage.add(byteHolder);
-                    }
-                    return PutObjectResponse.builder().build();
-                });
-
-        when(mockS3.getObject(any(GetObjectRequest.class)))
-                .thenAnswer((InvocationOnMock invocationOnMock) -> {
-                    ByteHolder byteHolder;
-                    synchronized (mockS3Storage) {
-                        byteHolder = mockS3Storage.get(0);
-                        mockS3Storage.remove(0);
-                    }
-                    return new ResponseInputStream<>(GetObjectResponse.builder().build(), new ByteArrayInputStream(byteHolder.getBytes()));
-                });*/
         schemaForRead = SchemaBuilder.newBuilder().addIntField("id")
                 .addStringField("name")
                 .build();
         recordHandler = new RecordHandler(mock(S3Client.class), mock(SecretsManagerClient.class), mock(AthenaClient.class), "spill-bucket", configOptions) {
             @Override
-            protected void readWithConstraint(BlockSpiller spiller, ReadRecordsRequest recordsRequest, QueryStatusChecker queryStatusChecker) throws Exception
+            protected void readWithConstraint(BlockSpiller spiller, ReadRecordsRequest recordsRequest, QueryStatusChecker queryStatusChecker)
             {
                 // no-op
             }
