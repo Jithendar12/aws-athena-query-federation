@@ -126,7 +126,7 @@ public class MetadataHandlerTest
             public void getPartitions(BlockWriter blockWriter, GetTableLayoutRequest request, QueryStatusChecker queryStatusChecker)
             {
                 try {
-                    blockWriter.writeRows((block, rowNum) -> {
+                    blockWriter.writeRows((Block block, int rowNum) -> {
                         block.setValue("partition_col", rowNum, "*");
                         return 1;
                     });
