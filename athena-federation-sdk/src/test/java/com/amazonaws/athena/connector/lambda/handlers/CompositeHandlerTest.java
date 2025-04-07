@@ -28,6 +28,7 @@ import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
 import com.amazonaws.athena.connector.lambda.domain.spill.S3SpillLocation;
 import com.amazonaws.athena.connector.lambda.domain.spill.SpillLocationVerifier;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsResponse;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutRequest;
@@ -41,6 +42,7 @@ import com.amazonaws.athena.connector.lambda.metadata.ListTablesResponse;
 import com.amazonaws.athena.connector.lambda.metadata.MetadataRequestType;
 import com.amazonaws.athena.connector.lambda.records.ReadRecordsRequest;
 import com.amazonaws.athena.connector.lambda.records.ReadRecordsResponse;
+import com.amazonaws.athena.connector.lambda.request.FederationRequest;
 import com.amazonaws.athena.connector.lambda.request.PingRequest;
 import com.amazonaws.athena.connector.lambda.request.PingResponse;
 import com.amazonaws.athena.connector.lambda.security.FederatedIdentity;
@@ -59,6 +61,7 @@ import org.junit.Test;
 import org.junit.rules.TestName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -69,6 +72,7 @@ import java.util.HashMap;
 import java.util.UUID;
 
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -318,5 +322,46 @@ public class CompositeHandlerTest
         assertNotNull(exceptionMessage);
 
         assertTrue(exceptionMessage.contains("Unexpected field[invalid]"));
+    }
+
+    @Test
+    public void unknownFederationRequest()
+    {
+        FederationRequest unknownRequest = new FederationRequest() {
+            @Override
+            public void close()
+            {
+                // no-op
+            }
+        };
+
+        OutputStream outputStream = new ByteArrayOutputStream();
+
+        AthenaConnectorException exception = assertThrows(AthenaConnectorException.class, () ->
+                compositeHandler.handleRequest(allocator, unknownRequest, outputStream, objectMapper)
+        );
+
+        assertTrue(exception.getMessage().contains("Unknown request class"));
+        assertEquals(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString(),
+                exception.getErrorDetails().errorCode());
+    }
+
+    @Test
+    public void pingRequestWithNullResponse()
+    {
+        FederatedIdentity identity = new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList());
+        PingRequest pingRequest = new PingRequest(identity, "catalog", "queryId");
+
+        when(mockMetadataHandler.doPing(any(PingRequest.class))).thenReturn(null);
+
+        OutputStream outputStream = new ByteArrayOutputStream();
+
+        AthenaConnectorException exception = assertThrows(AthenaConnectorException.class, () ->
+                compositeHandler.handleRequest(allocator, pingRequest, outputStream, objectMapper)
+        );
+
+        assertTrue(exception.getMessage().contains("Response was null"));
+        assertEquals(FederationSourceErrorCode.INVALID_RESPONSE_EXCEPTION.toString(),
+                exception.getErrorDetails().errorCode());
     }
 }
