@@ -50,7 +50,6 @@ import com.amazonaws.athena.connector.lambda.serde.VersionedObjectMapperFactory;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.arrow.vector.types.Types;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -68,7 +67,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -82,14 +80,12 @@ import static org.mockito.Mockito.mock;
 public class RecordHandlerTest
 {
     private RecordHandler recordHandler;
-    private List<ByteHolder> mockS3Storage;
     private BlockAllocator blockAllocator;
     private final FederatedIdentity identity = new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList());
-    String catalog = "catalog";
-    String queryId = "queryId";
-    private Schema schemaForRead;
+    private static final String CATALOG = "catalog";
+    private static final String QUERY_ID = "queryId";
     private S3BlockSpillReader spillReader;
-    private EncryptionKeyFactory keyFactory = new LocalKeyFactory();
+    private final EncryptionKeyFactory keyFactory = new LocalKeyFactory();
     @Mock
     private S3Client mockS3;
 
@@ -104,9 +100,6 @@ public class RecordHandlerTest
         configOptions.put("spill_prefix", prefix);
         spillReader = new S3BlockSpillReader(mockS3, blockAllocator);
 
-        schemaForRead = SchemaBuilder.newBuilder().addIntField("id")
-                .addStringField("name")
-                .build();
         recordHandler = new RecordHandler(mock(S3Client.class), mock(SecretsManagerClient.class), mock(AthenaClient.class), "test", configOptions) {
             @Override
             protected void readWithConstraint(BlockSpiller spiller, ReadRecordsRequest recordsRequest, QueryStatusChecker queryStatusChecker)
@@ -125,7 +118,7 @@ public class RecordHandlerTest
     @Test
     public void handleRequest() throws IOException
     {
-        FederationRequest invalidRequest = new GetDataSourceCapabilitiesRequest(identity, queryId, catalog);
+        FederationRequest invalidRequest = new GetDataSourceCapabilitiesRequest(identity, QUERY_ID, CATALOG);
 
         ByteArrayOutputStream invalidOutputStream = new ByteArrayOutputStream();
         ObjectMapper objectMapper = VersionedObjectMapperFactory.create(blockAllocator);
@@ -168,7 +161,7 @@ public class RecordHandlerTest
                 Range.range(blockAllocator, Types.MinorType.BIGINT.getType(), 100L, true, 100_000_000L, true)));
 
         ReadRecordsRequest request = new ReadRecordsRequest(identity,
-                catalog,
+                CATALOG,
                 "queryId-" + System.currentTimeMillis(),
                 new TableName("testSchema", "testTable"),
                 SchemaBuilder.newBuilder().build(),
@@ -205,7 +198,7 @@ public class RecordHandlerTest
     @Test
     public void pingHandleRequest() throws IOException
     {
-        FederationRequest pingRequest = new PingRequest(identity, catalog, queryId);
+        FederationRequest pingRequest = new PingRequest(identity, CATALOG, QUERY_ID);
         ByteArrayOutputStream pingOutputStream = new ByteArrayOutputStream();
         ObjectMapper objectMapper = VersionedObjectMapperFactory.create(blockAllocator);
         objectMapper.writeValue(pingOutputStream, pingRequest);
@@ -214,20 +207,5 @@ public class RecordHandlerTest
         recordHandler.handleRequest(pingInputStream, pingTestOutputStream, mock(Context.class));
         FederationResponse response = objectMapper.readValue(pingTestOutputStream.toByteArray(), FederationResponse.class);
         assertNotNull(response);
-    }
-
-    private class ByteHolder
-    {
-        private byte[] bytes;
-
-        public void setBytes(byte[] bytes)
-        {
-            this.bytes = bytes;
-        }
-
-        public byte[] getBytes()
-        {
-            return bytes;
-        }
     }
 }

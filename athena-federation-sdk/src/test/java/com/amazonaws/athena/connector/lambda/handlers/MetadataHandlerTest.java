@@ -80,8 +80,11 @@ public class MetadataHandlerTest
     private MetadataHandler metadataHandler;
     private BlockAllocator blockAllocator;
     private final FederatedIdentity identity = new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList());
-    String catalog = "catalog";
-    String queryId = "queryId";
+    private static final String CATALOG = "catalog";
+    private static final String QUERY_ID = "queryId";
+    private static final String SCHEMA_NAME = "testSchema";
+    private static final String TABLE_NAME = "testTable";
+    private static final String PARTITION_COL = "partition_col";
     @Mock
     private Constraints mockConstraints;
 
@@ -128,7 +131,7 @@ public class MetadataHandlerTest
                 try {
                     // Writing one partition for testing doGetTableLayout
                     blockWriter.writeRows((Block block, int rowNum) -> {
-                        block.setValue("partition_col", rowNum, "*");
+                        block.setValue(PARTITION_COL, rowNum, "*");
                         return 1;
                     });
                 }
@@ -157,8 +160,8 @@ public class MetadataHandlerTest
     @Test
     public void doGetTableLayout() throws Exception
     {
-        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, queryId, catalog,
-                new TableName("testSchema", "testTable"),
+        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, QUERY_ID, CATALOG,
+                new TableName(SCHEMA_NAME, TABLE_NAME),
                 mockConstraints,
                 SchemaBuilder.newBuilder().build(),
                 Collections.EMPTY_SET);
@@ -172,13 +175,13 @@ public class MetadataHandlerTest
     @Test
     public void doGetTableLayoutWithConstraints() throws Exception
     {
-        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, queryId, catalog,
-                new TableName("testSchema", "testTable"),
+        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, QUERY_ID, CATALOG,
+                new TableName(SCHEMA_NAME, TABLE_NAME),
                 mockConstraints,
-                SchemaBuilder.newBuilder().addStringField("partition_col").build(),
-                Collections.singleton("partition_col"));
+                SchemaBuilder.newBuilder().addStringField(PARTITION_COL).build(),
+                Collections.singleton(PARTITION_COL));
 
-        Schema partitionSchema = SchemaBuilder.newBuilder().addStringField("partition_col").build();
+        Schema partitionSchema = SchemaBuilder.newBuilder().addStringField(PARTITION_COL).build();
 
         BlockAllocator spyAllocator = spy(blockAllocator);
 
@@ -194,10 +197,10 @@ public class MetadataHandlerTest
     public void handleRequest()
             throws Exception
     {
-        TableName tableName = new TableName("testSchema", "testTable");
+        TableName tableName = new TableName(SCHEMA_NAME, TABLE_NAME);
         Schema schema = SchemaBuilder.newBuilder().build();
         Split split = mock(Split.class);
-        FederationRequest invalidRequest = new ReadRecordsRequest(null, catalog, queryId, tableName, schema, split, mockConstraints, 1024, 512);
+        FederationRequest invalidRequest = new ReadRecordsRequest(null, CATALOG, QUERY_ID, tableName, schema, split, mockConstraints, 1024, 512);
 
         ByteArrayOutputStream invalidOutputStream = new ByteArrayOutputStream();
         ObjectMapper objectMapper = VersionedObjectMapperFactory.create(blockAllocator);
@@ -213,7 +216,7 @@ public class MetadataHandlerTest
             assertTrue(e.getMessage().contains("Expected a MetadataRequest but found"));
         }
 
-        FederationRequest validRequest = new GetDataSourceCapabilitiesRequest(identity, queryId, catalog);
+        FederationRequest validRequest = new GetDataSourceCapabilitiesRequest(identity, QUERY_ID, CATALOG);
 
         ByteArrayOutputStream validOutputStream = new ByteArrayOutputStream();
         objectMapper.writeValue(validOutputStream, validRequest);
@@ -229,7 +232,7 @@ public class MetadataHandlerTest
     @Test
     public void pingHandleRequest() throws IOException
     {
-        FederationRequest pingRequest = new PingRequest(identity, catalog, queryId);
+        FederationRequest pingRequest = new PingRequest(identity, CATALOG, QUERY_ID);
         ByteArrayOutputStream pingOutputStream = new ByteArrayOutputStream();
         ObjectMapper objectMapper = VersionedObjectMapperFactory.create(blockAllocator);
         objectMapper.writeValue(pingOutputStream, pingRequest);
