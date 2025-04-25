@@ -24,22 +24,28 @@ import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
 import com.amazonaws.athena.connector.lambda.data.BlockUtils;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
+import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsResponse;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutResponse;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableResponse;
 import com.amazonaws.athena.connector.lambda.metadata.MetadataRequestType;
 import com.amazonaws.athena.connector.lambda.metadata.MetadataResponse;
 import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
 import com.amazonaws.athena.connectors.redis.lettuce.RedisCommandsWrapper;
 import com.amazonaws.athena.connectors.redis.lettuce.RedisConnectionFactory;
 import com.amazonaws.athena.connectors.redis.lettuce.RedisConnectionWrapper;
+import com.amazonaws.athena.connectors.redis.qpt.RedisQueryPassthrough;
 import com.amazonaws.athena.connectors.redis.util.MockKeyScanCursor;
+import com.google.common.collect.ImmutableMap;
 import io.lettuce.core.Range;
 import io.lettuce.core.ScanArgs;
 import io.lettuce.core.ScanCursor;
 import org.apache.arrow.vector.types.Types;
+import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.After;
 import org.junit.Before;
@@ -63,21 +69,32 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
+import static com.amazonaws.athena.connector.lambda.metadata.optimizations.querypassthrough.QueryPassthroughSignature.ENABLE_QUERY_PASSTHROUGH;
+import static com.amazonaws.athena.connector.lambda.metadata.optimizations.querypassthrough.QueryPassthroughSignature.SCHEMA_FUNCTION_NAME;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.KEY_PREFIX_TABLE_PROP;
+import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.QPT_CLUSTER_ENV_VAR;
+import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.QPT_COLUMN_NAME;
+import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.QPT_DB_NUMBER_ENV_VAR;
+import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.QPT_ENDPOINT_ENV_VAR;
+import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.QPT_SSL_ENV_VAR;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.REDIS_CLUSTER_FLAG;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.REDIS_DB_NUMBER;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.REDIS_ENDPOINT_PROP;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.REDIS_SSL_FLAG;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.VALUE_TYPE_TABLE_PROP;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.ZSET_KEYS_TABLE_PROP;
-import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.any;
+import static com.amazonaws.athena.connectors.redis.qpt.RedisQueryPassthrough.NAME;
+import static com.amazonaws.athena.connectors.redis.qpt.RedisQueryPassthrough.SCHEMA;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -119,11 +136,17 @@ public class RedisMetadataHandlerTest
             throws Exception
     {
         logger.info("{}: enter", testName.getMethodName());
+        Map<String, String> configOptions = ImmutableMap.<String, String>builder()
+                .put(QPT_SSL_ENV_VAR, "true")
+                .put(QPT_ENDPOINT_ENV_VAR, "localhost:6379")
+                .put(QPT_CLUSTER_ENV_VAR, "false")
+                .put(QPT_DB_NUMBER_ENV_VAR, "0")
+                .build();
 
         when(mockFactory.getOrCreateConn(eq(decodedEndpoint), anyBoolean(), anyBoolean(), nullable(String.class))).thenReturn(mockConnection);
         when(mockConnection.sync()).thenReturn(mockSyncCommands);
 
-        handler = new RedisMetadataHandler(mockGlue, new LocalKeyFactory(), mockSecretsManager, mockAthena, mockFactory, "bucket", "prefix", com.google.common.collect.ImmutableMap.of());
+        handler = new RedisMetadataHandler(mockGlue, new LocalKeyFactory(), mockSecretsManager, mockAthena, mockFactory, "bucket", "prefix", configOptions);
         allocator = new BlockAllocatorImpl();
 
         when(mockSecretsManager.getSecretValue(nullable(GetSecretValueRequest.class)))
@@ -304,5 +327,54 @@ public class RedisMetadataHandlerTest
 
         assertTrue("Continuation criteria violated", response.getSplits().size() == 3);
         assertTrue("Continuation criteria violated", response.getContinuationToken() == null);
+    }
+
+    @Test
+    public void testDoGetQueryPassthroughSchema() throws Exception
+    {
+        GetTableRequest request = getGetTableRequest();
+
+        GetTableResponse response = handler.doGetQueryPassthroughSchema(allocator, request);
+
+        assertNotNull("Response should not be null", response);
+        assertEquals(DEFAULT_CATALOG, response.getCatalogName());
+        assertEquals(new TableName(DEFAULT_SCHEMA, TEST_TABLE), response.getTableName());
+
+        Schema schema = response.getSchema();
+        assertNotNull("Schema should not be null", schema);
+
+        // QPT column field check
+        Field field = schema.findField(QPT_COLUMN_NAME);
+        assertNotNull("QPT column should exist", field);
+        assertEquals(Types.MinorType.VARCHAR.getType(), field.getType());
+
+        // Metadata checks
+        Map<String, String> metadata = schema.getCustomMetadata();
+        assertEquals("literal", metadata.get(VALUE_TYPE_TABLE_PROP));
+        assertEquals("*", metadata.get(KEY_PREFIX_TABLE_PROP));
+        assertEquals("true", metadata.get(REDIS_SSL_FLAG));
+        assertEquals("localhost:6379", metadata.get(REDIS_ENDPOINT_PROP));
+        assertEquals("false", metadata.get(REDIS_CLUSTER_FLAG));
+        assertEquals("0", metadata.get(REDIS_DB_NUMBER));
+    }
+
+    private static GetTableRequest getGetTableRequest()
+    {
+        Map<String, String> queryPassthroughParameters = Map.of(
+                SCHEMA_FUNCTION_NAME, "system.script",
+                ENABLE_QUERY_PASSTHROUGH, "true",
+                NAME, "script",
+                SCHEMA, "system",
+                RedisQueryPassthrough.SCRIPT, "return redis.call(\"GET\", KEYS[1])",
+                RedisQueryPassthrough.KEYS, "[\"l:a\"]",
+                RedisQueryPassthrough.ARGV, "[]"
+        );
+        return new GetTableRequest(
+                IDENTITY,
+                "queryId",
+                DEFAULT_CATALOG,
+                new TableName(DEFAULT_SCHEMA, TEST_TABLE),
+                queryPassthroughParameters
+        );
     }
 }
