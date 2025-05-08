@@ -19,6 +19,8 @@
  */
 package com.amazonaws.athena.connectors.oracle;
 
+import com.amazonaws.athena.connector.credentials.CredentialsProvider;
+import com.amazonaws.athena.connector.lambda.data.Block;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
 import com.amazonaws.athena.connector.lambda.data.BlockUtils;
@@ -27,13 +29,23 @@ import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
-import com.amazonaws.athena.connector.lambda.metadata.*;
+import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesResponse;
+import com.amazonaws.athena.connector.lambda.metadata.GetSplitsRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetSplitsResponse;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutResponse;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableResponse;
+import com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest;
+import com.amazonaws.athena.connector.lambda.metadata.ListTablesResponse;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.OptimizationSubType;
 import com.amazonaws.athena.connector.lambda.security.FederatedIdentity;
 import com.amazonaws.athena.connectors.jdbc.TestBase;
 import com.amazonaws.athena.connectors.jdbc.connection.DatabaseConnectionConfig;
 import com.amazonaws.athena.connectors.jdbc.connection.JdbcConnectionFactory;
-import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.amazonaws.athena.connectors.oracle.resolver.OracleJDBCCaseResolver;
+import oracle.jdbc.OracleTypes;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -54,6 +66,7 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +75,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.amazonaws.athena.connectors.oracle.OracleConstants.ORACLE_NAME;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.nullable;
 
 public class OracleMetadataHandlerTest
@@ -76,6 +92,9 @@ public class OracleMetadataHandlerTest
     private FederatedIdentity federatedIdentity;
     private SecretsManagerClient secretsManager;
     private AthenaClient athena;
+
+    private static final String QUERY_ID = "queryid";
+    private static final String CATALOG_NAME = "testCatalogName";
 
     @Before
     public void setup()
@@ -94,7 +113,7 @@ public class OracleMetadataHandlerTest
     @Test
     public void getPartitionSchema()
     {
-        Assert.assertEquals(SchemaBuilder.newBuilder()
+        assertEquals(SchemaBuilder.newBuilder()
                         .addField(OracleMetadataHandler.BLOCK_PARTITION_COLUMN_NAME, org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build(),
                 this.oracleMetadataHandler.getPartitionSchema("testCatalogName"));
     }
@@ -123,19 +142,19 @@ public class OracleMetadataHandlerTest
 
         GetTableLayoutResponse getTableLayoutResponse = this.oracleMetadataHandler.doGetTableLayout(blockAllocator, getTableLayoutRequest);
 
-        Assert.assertEquals(values.length, getTableLayoutResponse.getPartitions().getRowCount());
+        assertEquals(values.length, getTableLayoutResponse.getPartitions().getRowCount());
 
         List<String> expectedValues = new ArrayList<>();
         for (int i = 0; i < getTableLayoutResponse.getPartitions().getRowCount(); i++) {
             expectedValues.add(BlockUtils.rowToString(getTableLayoutResponse.getPartitions(), i));
         }
-        Assert.assertEquals(expectedValues, Arrays.asList("[partition_name : p0]", "[partition_name : p1]"));
+        assertEquals(expectedValues, Arrays.asList("[partition_name : p0]", "[partition_name : p1]"));
 
         SchemaBuilder expectedSchemaBuilder = SchemaBuilder.newBuilder();
         expectedSchemaBuilder.addField(FieldBuilder.newBuilder(OracleMetadataHandler.BLOCK_PARTITION_COLUMN_NAME, org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
         Schema expectedSchema = expectedSchemaBuilder.build();
-        Assert.assertEquals(expectedSchema, getTableLayoutResponse.getPartitions().getSchema());
-        Assert.assertEquals(tableName, getTableLayoutResponse.getTableName());
+        assertEquals(expectedSchema, getTableLayoutResponse.getPartitions().getSchema());
+        assertEquals(tableName, getTableLayoutResponse.getTableName());
 
         Mockito.verify(preparedStatement, Mockito.times(1)).setString(1, tableName.getTableName());
     }
@@ -164,19 +183,19 @@ public class OracleMetadataHandlerTest
 
         GetTableLayoutResponse getTableLayoutResponse = this.oracleMetadataHandler.doGetTableLayout(blockAllocator, getTableLayoutRequest);
 
-        Assert.assertEquals(values.length, getTableLayoutResponse.getPartitions().getRowCount());
+        assertEquals(values.length, getTableLayoutResponse.getPartitions().getRowCount());
 
         List<String> expectedValues = new ArrayList<>();
         for (int i = 0; i < getTableLayoutResponse.getPartitions().getRowCount(); i++) {
             expectedValues.add(BlockUtils.rowToString(getTableLayoutResponse.getPartitions(), i));
         }
-        Assert.assertEquals(expectedValues, Collections.singletonList("[partition_name : 0]"));
+        assertEquals(expectedValues, Collections.singletonList("[partition_name : 0]"));
 
         SchemaBuilder expectedSchemaBuilder = SchemaBuilder.newBuilder();
         expectedSchemaBuilder.addField(FieldBuilder.newBuilder(OracleMetadataHandler.BLOCK_PARTITION_COLUMN_NAME, org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
         Schema expectedSchema = expectedSchemaBuilder.build();
-        Assert.assertEquals(expectedSchema, getTableLayoutResponse.getPartitions().getSchema());
-        Assert.assertEquals(tableName, getTableLayoutResponse.getTableName());
+        assertEquals(expectedSchema, getTableLayoutResponse.getPartitions().getSchema());
+        assertEquals(tableName, getTableLayoutResponse.getTableName());
 
         Mockito.verify(preparedStatement, Mockito.times(1)).setString(1, tableName.getTableName());
     }
@@ -232,9 +251,9 @@ public class OracleMetadataHandlerTest
         Set<Map<String, String>> expectedSplits = new HashSet<>();
         expectedSplits.add(Collections.singletonMap(OracleMetadataHandler.BLOCK_PARTITION_COLUMN_NAME, "p0"));
         expectedSplits.add(Collections.singletonMap(OracleMetadataHandler.BLOCK_PARTITION_COLUMN_NAME, "p1"));
-        Assert.assertEquals(expectedSplits.size(), getSplitsResponse.getSplits().size());
+        assertEquals(expectedSplits.size(), getSplitsResponse.getSplits().size());
         Set<Map<String, String>> actualSplits = getSplitsResponse.getSplits().stream().map(Split::getProperties).collect(Collectors.toSet());
-        Assert.assertEquals(expectedSplits, actualSplits);
+        assertEquals(expectedSplits, actualSplits);
     }
 
     @Test
@@ -268,9 +287,45 @@ public class OracleMetadataHandlerTest
 
         Set<Map<String, String>> expectedSplits = new HashSet<>();
         expectedSplits.add(Collections.singletonMap("PARTITION_NAME".toLowerCase(), "p1"));
-        Assert.assertEquals(expectedSplits.size(), getSplitsResponse.getSplits().size());
+        assertEquals(expectedSplits.size(), getSplitsResponse.getSplits().size());
         Set<Map<String, String>> actualSplits = getSplitsResponse.getSplits().stream().map(Split::getProperties).collect(Collectors.toSet());
-        Assert.assertEquals(expectedSplits, actualSplits);
+        assertEquals(expectedSplits, actualSplits);
+    }
+
+    @Test
+    public void doGetSplits_queryPassthrough_returnsSingleSplit()
+    {
+        BlockAllocator blockAllocator = new BlockAllocatorImpl();
+        TableName tableName = new TableName("testSchema", "testTable");
+
+        Constraints constraints = Mockito.mock(Constraints.class);
+        Mockito.when(constraints.isQueryPassThrough()).thenReturn(true);
+        Map<String, String> passthroughArgs = new HashMap<>();
+        passthroughArgs.put("arg1", "val1");
+        passthroughArgs.put("arg2", "val2");
+        Mockito.when(constraints.getQueryPassthroughArguments()).thenReturn(passthroughArgs);
+
+        Block partitions = Mockito.mock(Block.class);
+
+        GetSplitsRequest request = new GetSplitsRequest(
+                federatedIdentity,
+                "qpt-query-id",
+                "testCatalogName",
+                tableName,
+                partitions,
+                Collections.emptyList(),
+                constraints,
+                null
+        );
+
+        GetSplitsResponse response = oracleMetadataHandler.doGetSplits(blockAllocator, request);
+
+        // Assertions
+        assertEquals("testCatalogName", response.getCatalogName());
+        assertEquals(1, response.getSplits().size());
+
+        Map<String, String> actualProps = response.getSplits().iterator().next().getProperties();
+        assertEquals(passthroughArgs, actualProps);
     }
 
     @Test
@@ -290,7 +345,7 @@ public class OracleMetadataHandlerTest
         ListTablesResponse listTablesResponse = this.oracleMetadataHandler.doListTables(
                 blockAllocator, new ListTablesRequest(this.federatedIdentity, "testQueryId",
                         "testCatalog", "testSchema", null, 1));
-        Assert.assertEquals("1", listTablesResponse.getNextToken());
+        assertEquals("1", listTablesResponse.getNextToken());
         Assert.assertArrayEquals(expected, listTablesResponse.getTables().toArray());
 
         preparedStatement = Mockito.mock(PreparedStatement.class);
@@ -303,7 +358,7 @@ public class OracleMetadataHandlerTest
         listTablesResponse = this.oracleMetadataHandler.doListTables(
                 blockAllocator, new ListTablesRequest(this.federatedIdentity, "testQueryId",
                         "testCatalog", "testSchema", "1", 1));
-        Assert.assertEquals("2", listTablesResponse.getNextToken());
+        assertEquals("2", listTablesResponse.getNextToken());
         Assert.assertArrayEquals(nextExpected, listTablesResponse.getTables().toArray());
     }
 
@@ -313,18 +368,25 @@ public class OracleMetadataHandlerTest
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
         String[] schema = {"DATA_TYPE", "COLUMN_SIZE", "COLUMN_NAME", "DECIMAL_DIGITS", "NUM_PREC_RADIX"};
-        Object[][] values = {{Types.INTEGER, 12, "testCol1", 0, 0}, {Types.VARCHAR, 25, "testCol2", 0, 0},
-                {Types.TIMESTAMP, 93, "testCol3", 0, 0},  {Types.TIMESTAMP_WITH_TIMEZONE, 93, "testCol4", 0, 0}, {Types.NUMERIC, 10, "testCol5", 2, 0}};
+        Object[][] values = {
+                {Types.INTEGER, 12, "testCol1", 0, 0},
+                {Types.VARCHAR, 25, "testCol2", 0, 0},
+                {Types.TIMESTAMP, 7, "testCol3", 0, 0}, // precision = 7, should map to DATEDAY
+                {OracleTypes.TIMESTAMPLTZ, 0, "testCol4", 0, 0}, // TIMESTAMP WITH LOCAL TZ → DATEMILLI
+                {OracleTypes.TIMESTAMPTZ, 0, "testCol5", 0, 0}, // TIMESTAMP WITH TZ → DATEMILLI
+                {Types.NUMERIC, 10, "testCol6", 2, 0}
+        };
         AtomicInteger rowNumber = new AtomicInteger(-1);
         ResultSet resultSet = mockResultSet(schema, values, rowNumber);
 
         SchemaBuilder expectedSchemaBuilder = SchemaBuilder.newBuilder();
         expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol1", org.apache.arrow.vector.types.Types.MinorType.INT.getType()).build());
         expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol2", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
-        expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol3", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType()).build());
+        expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol3", org.apache.arrow.vector.types.Types.MinorType.DATEDAY.getType()).build());
         expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol4", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType()).build());
-        ArrowType.Decimal testCol5ArrowType = ArrowType.Decimal.createDecimal(10, 2, 128);
-        expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol5", testCol5ArrowType).build());
+        expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol5", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType()).build());
+        ArrowType.Decimal testCol6ArrowType = ArrowType.Decimal.createDecimal(10, 2, 128);
+        expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol6", testCol6ArrowType).build());
         PARTITION_SCHEMA.getFields().forEach(expectedSchemaBuilder::addField);
         Schema expected = expectedSchemaBuilder.build();
 
@@ -335,8 +397,78 @@ public class OracleMetadataHandlerTest
         GetTableResponse getTableResponse = this.oracleMetadataHandler.doGetTable(
                 blockAllocator, new GetTableRequest(this.federatedIdentity, "testQueryId", "testCatalog", inputTableName, Collections.emptyMap()));
 
-        Assert.assertEquals(expected, getTableResponse.getSchema());
-        Assert.assertEquals(inputTableName, getTableResponse.getTableName());
-        Assert.assertEquals("testCatalog", getTableResponse.getCatalogName());
+        assertEquals(expected, getTableResponse.getSchema());
+        assertEquals(inputTableName, getTableResponse.getTableName());
+        assertEquals("testCatalog", getTableResponse.getCatalogName());
+    }
+
+    @Test
+    public void doGetTable_withUnsupported_fallbackToVarchar() throws Exception
+    {
+        BlockAllocator blockAllocator = new BlockAllocatorImpl();
+        String[] schema = {"DATA_TYPE", "COLUMN_SIZE", "COLUMN_NAME", "DECIMAL_DIGITS", "NUM_PREC_RADIX"};
+
+        Object[][] values = {
+                {Types.CLOB, 0, "clobCol", 0, 0},
+                {Types.SQLXML, 0, "xmlCol", 0, 0}
+        };
+
+        AtomicInteger rowNumber = new AtomicInteger(-1);
+        ResultSet resultSet = mockResultSet(schema, values, rowNumber);
+
+        SchemaBuilder expectedSchemaBuilder = SchemaBuilder.newBuilder();
+        expectedSchemaBuilder.addField(FieldBuilder.newBuilder("clobCol", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+        expectedSchemaBuilder.addField(FieldBuilder.newBuilder("xmlCol", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+
+        PARTITION_SCHEMA.getFields().forEach(expectedSchemaBuilder::addField);
+        Schema expected = expectedSchemaBuilder.build();
+
+        TableName inputTableName = new TableName("TESTSCHEMA", "TESTTABLE");
+
+        Mockito.when(connection.getMetaData().getColumns("testCatalog", inputTableName.getSchemaName(), inputTableName.getTableName(), null))
+                .thenReturn(resultSet);
+        Mockito.when(connection.getCatalog()).thenReturn("testCatalog");
+
+        GetTableResponse getTableResponse = this.oracleMetadataHandler.doGetTable(
+                blockAllocator, new GetTableRequest(this.federatedIdentity, "testQueryId", "testCatalog", inputTableName, Collections.emptyMap()));
+
+        assertEquals(expected, getTableResponse.getSchema());
+        assertEquals(inputTableName, getTableResponse.getTableName());
+        assertEquals("testCatalog", getTableResponse.getCatalogName());
+    }
+
+    @Test
+    public void testDoGetDataSourceCapabilities()
+    {
+        BlockAllocator allocator = new BlockAllocatorImpl();
+        GetDataSourceCapabilitiesRequest request =
+                new GetDataSourceCapabilitiesRequest(federatedIdentity, QUERY_ID, CATALOG_NAME);
+
+        GetDataSourceCapabilitiesResponse response =
+                oracleMetadataHandler.doGetDataSourceCapabilities(allocator, request);
+
+        Map<String, List<OptimizationSubType>> capabilities = response.getCapabilities();
+
+        assertEquals("testCatalogName", response.getCatalogName());
+
+        // Filter pushdown
+        List<OptimizationSubType> filterPushdown = capabilities.get("supports_filter_pushdown");
+        assertNotNull("Expected supports_filter_pushdown capability to be present", filterPushdown);
+        assertEquals(2, filterPushdown.size());
+        assertTrue(filterPushdown.stream().anyMatch(subType -> subType.getSubType().equals("sorted_range_set")));
+        assertTrue(filterPushdown.stream().anyMatch(subType -> subType.getSubType().equals("nullable_comparison")));
+
+        // Complex expression pushdown
+        List<OptimizationSubType> complexPushdown = capabilities.get("supports_complex_expression_pushdown");
+        assertNotNull("Expected supports_complex_expression_pushdown capability to be present", complexPushdown);
+        assertEquals(1, complexPushdown.size());
+        assertTrue(complexPushdown.stream().anyMatch(subType ->
+                subType.getSubType().equals("supported_function_expression_types") &&
+                        !subType.getProperties().isEmpty()));
+
+        // Top-N pushdown
+        List<OptimizationSubType> topNPushdown = capabilities.get("supports_top_n_pushdown");
+        assertNotNull("Expected supports_top_n_pushdown capability to be present", topNPushdown);
+        assertEquals(1, topNPushdown.size());
     }
 }
