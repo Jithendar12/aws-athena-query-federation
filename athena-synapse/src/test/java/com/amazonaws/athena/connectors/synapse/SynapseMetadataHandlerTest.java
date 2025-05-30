@@ -19,6 +19,7 @@
  */
 package com.amazonaws.athena.connectors.synapse;
 
+import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
 import com.amazonaws.athena.connector.lambda.data.BlockUtils;
@@ -27,6 +28,8 @@ import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
+import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesResponse;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsResponse;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutRequest;
@@ -35,13 +38,14 @@ import com.amazonaws.athena.connector.lambda.metadata.GetTableRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableResponse;
 import com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest;
 import com.amazonaws.athena.connector.lambda.metadata.ListTablesResponse;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.OptimizationSubType;
 import com.amazonaws.athena.connector.lambda.security.FederatedIdentity;
 import com.amazonaws.athena.connectors.jdbc.TestBase;
 import com.amazonaws.athena.connectors.jdbc.connection.DatabaseConnectionConfig;
 import com.amazonaws.athena.connectors.jdbc.connection.JdbcConnectionFactory;
-import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.amazonaws.athena.connectors.jdbc.manager.JDBCUtil;
 import com.amazonaws.athena.connectors.synapse.resolver.SynapseJDBCCaseResolver;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.Before;
@@ -57,15 +61,19 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -75,6 +83,10 @@ import static com.amazonaws.athena.connectors.synapse.SynapseMetadataHandler.PAR
 import static com.amazonaws.athena.connectors.synapse.SynapseMetadataHandler.PARTITION_COLUMN;
 import static com.amazonaws.athena.connectors.synapse.SynapseMetadataHandler.PARTITION_NUMBER;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -89,6 +101,7 @@ public class SynapseMetadataHandlerTest
     private static final Logger logger = LoggerFactory.getLogger(SynapseMetadataHandlerTest.class);
     private DatabaseConnectionConfig databaseConnectionConfig = new DatabaseConnectionConfig("testCatalog", SynapseConstants.NAME,
             "synapse://jdbc:sqlserver://hostname;databaseName=fakedatabase");
+    private static final Schema PARTITION_SCHEMA = SchemaBuilder.newBuilder().addField(PARTITION_NUMBER, org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build();
     private SynapseMetadataHandler synapseMetadataHandler;
     private JdbcConnectionFactory jdbcConnectionFactory;
     private Connection connection;
@@ -113,7 +126,8 @@ public class SynapseMetadataHandlerTest
     }
 
     @Test
-    public void getPartitionSchema() {
+    public void getPartitionSchema()
+    {
         assertEquals(SchemaBuilder.newBuilder()
                         .addField(PARTITION_NUMBER, org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build(),
                 this.synapseMetadataHandler.getPartitionSchema("testCatalogName"));
@@ -346,8 +360,6 @@ public class SynapseMetadataHandlerTest
     public void doGetTable()
             throws Exception
     {
-        Schema PARTITION_SCHEMA = SchemaBuilder.newBuilder().addField(PARTITION_NUMBER, org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build();
-
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
         String[] schema = {"DATA_TYPE", "COLUMN_NAME", "PRECISION", "SCALE"};
         int[] types = {Types.INTEGER, Types.VARCHAR, Types.VARCHAR, Types.VARCHAR};
@@ -452,5 +464,207 @@ public class SynapseMetadataHandlerTest
         };
 
         assertEquals(Arrays.toString(expectedTables), listTablesResponse.getTables().toString());
+    }
+
+    @Test
+    public void testConvertDatasourceTypeToArrowWithSynapseSpecificTypes()
+    {
+        try {
+            ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+            Map<String, String> configOptions = new HashMap<>();
+            int precision = 0;
+
+            // Map of Synapse data type -> expected ArrowType
+            Map<String, ArrowType> expectedMappings = new HashMap<>();
+            expectedMappings.put("BIT", org.apache.arrow.vector.types.Types.MinorType.TINYINT.getType());
+            expectedMappings.put("TINYINT", org.apache.arrow.vector.types.Types.MinorType.SMALLINT.getType());
+            expectedMappings.put("NUMERIC", org.apache.arrow.vector.types.Types.MinorType.FLOAT8.getType());
+            expectedMappings.put("SMALLMONEY", org.apache.arrow.vector.types.Types.MinorType.FLOAT8.getType());
+            expectedMappings.put("DATE", org.apache.arrow.vector.types.Types.MinorType.DATEDAY.getType());
+            expectedMappings.put("DATETIME", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType());
+            expectedMappings.put("DATETIME2", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType());
+            expectedMappings.put("SMALLDATETIME", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType());
+            expectedMappings.put("DATETIMEOFFSET", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType());
+
+            int index = 1;
+            for (Map.Entry<String, ArrowType> entry : expectedMappings.entrySet()) {
+                String synapseType = entry.getKey();
+                ArrowType expectedArrowType = entry.getValue();
+
+                when(metaData.getColumnTypeName(index)).thenReturn(synapseType);
+
+                Optional<ArrowType> actual = synapseMetadataHandler.convertDatasourceTypeToArrow(index, precision, configOptions, metaData);
+
+                assertEquals(expectedArrowType, actual.get());
+
+                index++;
+            }
+        }
+        catch (Exception e) {
+            fail("Unexpected exception: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testDoDataTypeConversionWithAzureServerless()
+    {
+        try {
+            BlockAllocator blockAllocator = new BlockAllocatorImpl();
+            String[] schema = {"DATA_TYPE", "COLUMN_NAME", "PRECISION", "SCALE"};
+            int[] types = {Types.VARCHAR, Types.VARCHAR, Types.INTEGER, Types.INTEGER};
+
+            Object[][] values = {
+                    // VARCHAR group
+                    {"varchar", "testCol1", 0, 0}, // varchar
+                    {"char", "testCol2", 0, 0}, // char
+                    {"binary", "testCol3", 0, 0}, // binary
+                    {"nchar", "testCol4", 0, 0}, // nchar
+                    {"nvarchar", "testCol5", 0, 0}, // nvarchar
+                    {"varbinary", "testCol6", 0, 0}, // varbinary
+                    {"time", "testCol7", 0, 0}, // time
+                    {"uniqueidentifier", "testCol8", 0, 0}, // uniqueidentifier
+
+                    // Boolean
+                    {"bit", "testCol9", 0, 0},
+
+                    // Integer group
+                    {"tinyint", "testCol10", 0, 0},
+                    {"smallint", "testCol11", 0, 0},
+                    {"int", "testCol12", 0, 0},
+                    {"bigint", "testCol13", 0, 0},
+
+                    // Decimal
+                    {"decimal", "testCol14", 10, 2},
+                    {"float", "testCol15", 0, 0}, // float
+                    {"float", "testCol16", 0, 0}, // float
+                    {"real", "testCol17", 0, 0}, // real
+
+                    // Dates
+                    {"date", "testCol18", 0, 0},
+                    {"datetime", "testCol19", 0, 0}, // datetime/datetime2
+                    {"datetimeoffset", "testCol20", 0, 0} // datetimeoffset
+            };
+
+            ResultSet resultSet = mockResultSet(schema, types, values, new AtomicInteger(-1));
+
+            SchemaBuilder expectedSchemaBuilder = SchemaBuilder.newBuilder();
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol1", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol2", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol3", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol4", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol5", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol6", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol7", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol8", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
+
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol9", org.apache.arrow.vector.types.Types.MinorType.TINYINT.getType()).build());
+
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol10", org.apache.arrow.vector.types.Types.MinorType.SMALLINT.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol11", org.apache.arrow.vector.types.Types.MinorType.SMALLINT.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol12", org.apache.arrow.vector.types.Types.MinorType.INT.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol13", org.apache.arrow.vector.types.Types.MinorType.BIGINT.getType()).build());
+
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol14", new ArrowType.Decimal(10, 2, 256)).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol15", org.apache.arrow.vector.types.Types.MinorType.FLOAT8.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol16", org.apache.arrow.vector.types.Types.MinorType.FLOAT8.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol17", org.apache.arrow.vector.types.Types.MinorType.FLOAT4.getType()).build());
+
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol18", org.apache.arrow.vector.types.Types.MinorType.DATEDAY.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol19", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType()).build());
+            expectedSchemaBuilder.addField(FieldBuilder.newBuilder("testCol20", org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType()).build());
+
+            PARTITION_SCHEMA.getFields().forEach(expectedSchemaBuilder::addField);
+            Schema expected = expectedSchemaBuilder.build();
+
+            PreparedStatement stmt = mock(PreparedStatement.class);
+            when(connection.prepareStatement(nullable(String.class))).thenReturn(stmt);
+            when(stmt.executeQuery()).thenReturn(resultSet);
+
+            when(connection.getMetaData().getURL()).thenReturn("jdbc:sqlserver://test-ondemand.sql.azuresynapse.net;databaseName=fakedatabase");
+
+            TableName inputTableName = new TableName("TESTSCHEMA", "TESTTABLE");
+            when(connection.getCatalog()).thenReturn("testCatalog");
+
+            GetTableResponse getTableResponse = this.synapseMetadataHandler.doGetTable(
+                    blockAllocator, new GetTableRequest(this.federatedIdentity, "testQueryId", "testCatalog", inputTableName, Collections.emptyMap()));
+
+            // Compare schemas ignoring order
+            assertTrue("Schemas do not match when ignoring order", schemasMatchIgnoringOrder(expected, getTableResponse.getSchema()));
+            assertEquals(inputTableName, getTableResponse.getTableName());
+            assertEquals("testCatalog", getTableResponse.getCatalogName());
+        }
+        catch (Exception e) {
+            fail("Unexpected exception: " + e.getMessage());
+        }
+    }
+
+    // Helper method to compare schemas ignoring field order
+    private boolean schemasMatchIgnoringOrder(Schema expected, Schema actual)
+    {
+        if (expected == actual) {
+            return true;
+        }
+        if (expected == null || actual == null) {
+            return false;
+        }
+        List<Field> expectedFields = expected.getFields();
+        List<Field> actualFields = actual.getFields();
+        if (expectedFields.size() != actualFields.size()) {
+            return false;
+        }
+
+        Map<String, ArrowType> expectedFieldMap = expectedFields.stream()
+                .collect(Collectors.toMap(
+                        Field::getName,
+                        Field::getType,
+                        (t1, t2) -> t1, // Merge function to handle duplicate keys (not expected here)
+                        LinkedHashMap::new
+                ));
+        Map<String, ArrowType> actualFieldMap = actualFields.stream()
+                .collect(Collectors.toMap(
+                        Field::getName,
+                        Field::getType,
+                        (t1, t2) -> t1,
+                        LinkedHashMap::new
+                ));
+
+        return expectedFieldMap.equals(actualFieldMap);
+    }
+
+    @Test
+    public void testDoGetDataSourceCapabilities()
+    {
+        BlockAllocator allocator = new BlockAllocatorImpl();
+        GetDataSourceCapabilitiesRequest request =
+                new GetDataSourceCapabilitiesRequest(federatedIdentity, "testQueryId", "testCatalog");
+
+        GetDataSourceCapabilitiesResponse response =
+                synapseMetadataHandler.doGetDataSourceCapabilities(allocator, request);
+
+        Map<String, List<OptimizationSubType>> capabilities = response.getCapabilities();
+
+        assertEquals("testCatalog", response.getCatalogName());
+
+        // Filter pushdown
+        List<OptimizationSubType> filterPushdown = capabilities.get("supports_filter_pushdown");
+        assertNotNull("Expected supports_filter_pushdown capability to be present", filterPushdown);
+        assertEquals(2, filterPushdown.size());
+        assertTrue(filterPushdown.stream().anyMatch(subType -> subType.getSubType().equals("sorted_range_set")));
+        assertTrue(filterPushdown.stream().anyMatch(subType -> subType.getSubType().equals("nullable_comparison")));
+
+        // Complex expression pushdown
+        List<OptimizationSubType> complexPushdown = capabilities.get("supports_complex_expression_pushdown");
+        assertNotNull("Expected supports_complex_expression_pushdown capability to be present", complexPushdown);
+        assertEquals(1, complexPushdown.size());
+        OptimizationSubType complexSubType = complexPushdown.get(0);
+        assertEquals("supported_function_expression_types", complexSubType.getSubType());
+        assertNotNull("Expected function expression types to be present", complexSubType.getProperties());
+        assertFalse("Expected function expression types to be non-empty", complexSubType.getProperties().isEmpty());
+
+        // Top-N pushdown
+        List<OptimizationSubType> topNPushdown = capabilities.get("supports_top_n_pushdown");
+        assertNotNull("Expected supports_top_n_pushdown capability to be present", topNPushdown);
+        assertEquals(1, topNPushdown.size());
+        assertEquals("SUPPORTS_ORDER_BY", topNPushdown.get(0).getSubType());
     }
 }
