@@ -23,6 +23,12 @@ import com.amazonaws.athena.connector.lambda.data.*;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
 import com.amazonaws.athena.connector.lambda.metadata.*;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.DataSourceOptimizations;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.OptimizationSubType;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.pushdown.ComplexExpressionPushdownSubType;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.pushdown.FilterPushdownSubType;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.pushdown.LimitPushdownSubType;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.pushdown.TopNPushdownSubType;
 import com.amazonaws.athena.connector.lambda.security.FederatedIdentity;
 import com.amazonaws.athena.connectors.jdbc.TestBase;
 import com.amazonaws.athena.connectors.jdbc.connection.DatabaseConnectionConfig;
@@ -45,6 +51,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.nullable;
 
@@ -85,7 +92,7 @@ public class HiveMetadataHandlerTest
 
     @Test
     public void getPartitionSchema() {
-        Assert.assertEquals(SchemaBuilder.newBuilder()
+        assertEquals(SchemaBuilder.newBuilder()
                         .addField("partition", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build(),
                 this.hiveMetadataHandler.getPartitionSchema("testCatalogName"));
     }
@@ -133,14 +140,14 @@ public class HiveMetadataHandlerTest
         for (int i = 0; i < getTableLayoutResponse.getPartitions().getRowCount(); i++) {
             actualValues.add(BlockUtils.rowToString(getTableLayoutResponse.getPartitions(), i));
         }
-        Assert.assertEquals(2, actualValues.size());
-        Assert.assertEquals("[partition :  case_date=02-01-2000 and case_number=1 and case_instance=89898990 and case_location='Hyderabad']", actualValues.get(0));
-        Assert.assertEquals("[partition :  case_date=01-01-2000 and case_number=0 and case_instance=89898989 and case_location is NULL]", actualValues.get(1));
+        assertEquals(2, actualValues.size());
+        assertEquals("[partition :  case_date=02-01-2000 and case_number=1 and case_instance=89898990 and case_location='Hyderabad']", actualValues.get(0));
+        assertEquals("[partition :  case_date=01-01-2000 and case_number=0 and case_instance=89898989 and case_location is NULL]", actualValues.get(1));
         SchemaBuilder expectedSchemaBuilder = SchemaBuilder.newBuilder();
         expectedSchemaBuilder.addField(FieldBuilder.newBuilder("partition", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
         Schema expectedSchema = expectedSchemaBuilder.build();
-        Assert.assertEquals(expectedSchema, getTableLayoutResponse.getPartitions().getSchema());
-        Assert.assertEquals(tempTableName, getTableLayoutResponse.getTableName());
+        assertEquals(expectedSchema, getTableLayoutResponse.getPartitions().getSchema());
+        assertEquals(tempTableName, getTableLayoutResponse.getTableName());
     }
 
     @Test
@@ -175,12 +182,12 @@ public class HiveMetadataHandlerTest
         for (int i = 0; i < getTableLayoutResponse.getPartitions().getRowCount(); i++) {
             expectedValues.add(BlockUtils.rowToString(getTableLayoutResponse.getPartitions(), i));
         }
-        Assert.assertEquals(expectedValues, Arrays.asList("[partition : *]"));
+        assertEquals(expectedValues, Arrays.asList("[partition : *]"));
         SchemaBuilder expectedSchemaBuilder = SchemaBuilder.newBuilder();
         expectedSchemaBuilder.addField(FieldBuilder.newBuilder("partition", org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
         Schema expectedSchema = expectedSchemaBuilder.build();
-        Assert.assertEquals(expectedSchema, getTableLayoutResponse.getPartitions().getSchema());
-        Assert.assertEquals(tempTableName, getTableLayoutResponse.getTableName());
+        assertEquals(expectedSchema, getTableLayoutResponse.getPartitions().getSchema());
+        assertEquals(tempTableName, getTableLayoutResponse.getTableName());
     }
 
     @Test(expected = RuntimeException.class)
@@ -240,7 +247,7 @@ public class HiveMetadataHandlerTest
         BlockAllocator splitBlockAllocator = new BlockAllocatorImpl();
         GetSplitsRequest getSplitsRequest = new GetSplitsRequest(this.federatedIdentity, "testQueryId", "testCatalogName", tempTableName, getTableLayoutResponse.getPartitions(), new ArrayList<>(partitionCols), constraints, null);
         GetSplitsResponse getSplitsResponse = this.hiveMetadataHandler.doGetSplits(splitBlockAllocator, getSplitsRequest);
-        Assert.assertEquals(2, getSplitsResponse.getSplits().size());
+        assertEquals(2, getSplitsResponse.getSplits().size());
     }
 
 
@@ -267,7 +274,7 @@ public class HiveMetadataHandlerTest
             splitRequestToken=Integer.valueOf(getSplitsRequest.getContinuationToken());
         }
 
-        Assert.assertNotNull(splitRequestToken.toString());
+        assertNotNull(splitRequestToken.toString());
 
     }
 
@@ -295,8 +302,8 @@ public class HiveMetadataHandlerTest
         Mockito.when(this.connection.getCatalog()).thenReturn("testCatalog");
         GetTableResponse getTableResponse = this.hiveMetadataHandler.doGetTable(
                 this.blockAllocator, new GetTableRequest(this.federatedIdentity, "testQueryId", "testCatalog", inputTableName, Collections.emptyMap()));
-        Assert.assertEquals(inputTableName, getTableResponse.getTableName());
-        Assert.assertEquals("testCatalog", getTableResponse.getCatalogName());
+        assertEquals(inputTableName, getTableResponse.getTableName());
+        assertEquals("testCatalog", getTableResponse.getCatalogName());
     }
 
     @Test
@@ -314,5 +321,46 @@ public class HiveMetadataHandlerTest
         Mockito.when(this.connection.getMetaData().getColumns(nullable(String.class), nullable(String.class), nullable(String.class), nullable(String.class)))
                 .thenThrow(new SQLException());
         this.hiveMetadataHandler.doGetTable(this.blockAllocator, new GetTableRequest(this.federatedIdentity, "testQueryId", "testCatalog", inputTableName, Collections.emptyMap()));
+    }
+
+    @Test
+    public void testDoGetDataSourceCapabilities()
+    {
+        GetDataSourceCapabilitiesRequest request = new GetDataSourceCapabilitiesRequest(federatedIdentity, "testQueryId", "testCatalog");
+        GetDataSourceCapabilitiesResponse response = hiveMetadataHandler.doGetDataSourceCapabilities(blockAllocator, request);
+        
+        Map<String, List<OptimizationSubType>> capabilities = response.getCapabilities();
+        
+        // filter pushdown
+        List<OptimizationSubType> filterPushdowns = capabilities.get(DataSourceOptimizations.SUPPORTS_FILTER_PUSHDOWN.getOptimization());
+        assertNotNull("Filter pushdown capabilities should be present", filterPushdowns);
+        assertTrue("Should support sorted range set pushdown",
+            filterPushdowns.stream().anyMatch(subType -> subType.getSubType().equals(FilterPushdownSubType.SORTED_RANGE_SET.getSubType())));
+        assertTrue("Should support nullable comparison pushdown",
+            filterPushdowns.stream().anyMatch(subType -> subType.getSubType().equals(FilterPushdownSubType.NULLABLE_COMPARISON.getSubType())));
+
+        // complex expression pushdown
+        List<OptimizationSubType> complexExprPushdowns = capabilities.get(DataSourceOptimizations.SUPPORTS_COMPLEX_EXPRESSION_PUSHDOWN.getOptimization());
+        assertNotNull("Complex expression pushdown capabilities should be present", complexExprPushdowns);
+        OptimizationSubType complexSubType = complexExprPushdowns.get(0);
+        assertEquals("Complex expression subtype should be supported function expression types",
+            ComplexExpressionPushdownSubType.SUPPORTED_FUNCTION_EXPRESSION_TYPES.getSubType(), complexSubType.getSubType());
+        List<String> supportedFunctions = complexSubType.getProperties();
+        assertFalse("NULLIF function should not be supported",
+            supportedFunctions.contains("NULLIF"));
+        assertFalse("IS_DISTINCT_FROM operator should not be supported",
+            supportedFunctions.contains("IS_DISTINCT_FROM"));
+
+        // TOP N pushdown
+        List<OptimizationSubType> topNPushdowns = capabilities.get(DataSourceOptimizations.SUPPORTS_TOP_N_PUSHDOWN.getOptimization());
+        assertNotNull("TOP N pushdown capabilities should be present", topNPushdowns);
+        assertTrue("Should support ORDER BY pushdown",
+            topNPushdowns.stream().anyMatch(subType -> subType.getSubType().equals(TopNPushdownSubType.SUPPORTS_ORDER_BY.getSubType())));
+
+        // LIMIT pushdown
+        List<OptimizationSubType> limitPushdowns = capabilities.get(DataSourceOptimizations.SUPPORTS_LIMIT_PUSHDOWN.getOptimization());
+        assertNotNull("LIMIT pushdown capabilities should be present", limitPushdowns);
+        assertTrue("Should support integer constant limit pushdown",
+            limitPushdowns.stream().anyMatch(subType -> subType.getSubType().equals(LimitPushdownSubType.INTEGER_CONSTANT.getSubType())));
     }
 }

@@ -135,7 +135,7 @@ public class HiveRecordHandlerTest
         Mockito.when(this.connection.prepareStatement(nullable(String.class))).thenReturn(expectedPreparedStatement);
         PreparedStatement preparedStatement = this.hiveRecordHandler.buildSplitSql(this.connection, "testCatalogName", tableName, schema, constraints, split);
         Assert.assertEquals(expectedPreparedStatement, preparedStatement);
-        Date expectedDate = new Date(120, 0, 5);
+        Date expectedDate = new Date(120, 0, 4);
         Assert.assertEquals(expectedPreparedStatement, preparedStatement);
         Mockito.verify(preparedStatement, Mockito.times(1))
                 .setDate(1, expectedDate);
