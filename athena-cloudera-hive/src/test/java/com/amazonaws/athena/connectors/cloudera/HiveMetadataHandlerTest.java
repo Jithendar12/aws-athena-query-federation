@@ -36,7 +36,6 @@ import com.amazonaws.athena.connectors.jdbc.connection.JdbcConnectionFactory;
 import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -250,6 +249,89 @@ public class HiveMetadataHandlerTest
         assertEquals(2, getSplitsResponse.getSplits().size());
     }
 
+    @Test
+    public void testDoGetSplitsWithQueryPassthrough()
+    {
+        // Setup test data
+        TableName tableName = new TableName("testSchema", "testTable");
+        Schema partitionSchema = this.hiveMetadataHandler.getPartitionSchema("testCatalogName");
+        Set<String> partitionCols = partitionSchema.getFields().stream()
+                .map(Field::getName)
+                .collect(Collectors.toSet());
+        
+        // Create mocked constraints with query passthrough enabled
+        Constraints constraints = Mockito.mock(Constraints.class);
+        Mockito.when(constraints.isQueryPassThrough()).thenReturn(true);
+        
+        // Create the request objects
+        BlockAllocator blockAllocator = new BlockAllocatorImpl();
+        Block partitions = Mockito.mock(Block.class);
+        
+        GetSplitsRequest getSplitsRequest = new GetSplitsRequest(
+                this.federatedIdentity,
+                "testQueryId",
+                "testCatalogName",
+                tableName,
+                partitions,
+                new ArrayList<>(partitionCols),
+                constraints,
+                null);
+        
+        // Execute the method
+        GetSplitsResponse getSplitsResponse = this.hiveMetadataHandler.doGetSplits(blockAllocator, getSplitsRequest);
+        
+        // Verify that exactly one split was returned for query passthrough
+        assertEquals(1, getSplitsResponse.getSplits().size());
+        assertEquals("testCatalogName", getSplitsResponse.getCatalogName());
+    }
+
+    @Test
+    public void testDoGetSplitsWithContinuationToken()
+    {
+        // Setup test data
+        TableName tableName = new TableName("testSchema", "testTable");
+        Schema partitionSchema = this.hiveMetadataHandler.getPartitionSchema("testCatalogName");
+        Set<String> partitionCols = partitionSchema.getFields().stream()
+                .map(Field::getName)
+                .collect(Collectors.toSet());
+
+        // Create mocked constraints
+        Constraints constraints = Mockito.mock(Constraints.class);
+        Mockito.when(constraints.isQueryPassThrough()).thenReturn(false);
+
+        // Create block with partitions
+        BlockAllocator blockAllocator = new BlockAllocatorImpl();
+        SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
+        schemaBuilder.addField(HiveConstants.BLOCK_PARTITION_COLUMN_NAME, org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType());
+        Block partitionsBlock = blockAllocator.createBlock(schemaBuilder.build());
+
+        // Add two partitions - we'll request the second one using continuation token
+        partitionsBlock.setValue(HiveConstants.BLOCK_PARTITION_COLUMN_NAME, 0, "partition_0");
+        partitionsBlock.setValue(HiveConstants.BLOCK_PARTITION_COLUMN_NAME, 1, "partition_1");
+        partitionsBlock.setRowCount(2);
+
+        GetSplitsRequest getSplitsRequest = new GetSplitsRequest(
+                this.federatedIdentity,
+                "testQueryId",
+                "testCatalogName",
+                tableName,
+                partitionsBlock,
+                new ArrayList<>(partitionCols),
+                constraints,
+                "0"); // Request continuation from first partition
+
+        // Execute the method
+        GetSplitsResponse getSplitsResponse = this.hiveMetadataHandler.doGetSplits(blockAllocator, getSplitsRequest);
+
+        // Verify that both partitions are returned
+        assertEquals(2, getSplitsResponse.getSplits().size());
+        Set<String> expectedPartitions = new HashSet<>(Arrays.asList("partition_0", "partition_1"));
+        Set<String> actualPartitions = getSplitsResponse.getSplits().stream()
+                .map(split -> split.getProperties().get(HiveConstants.BLOCK_PARTITION_COLUMN_NAME))
+                .collect(Collectors.toSet());
+        assertEquals(expectedPartitions, actualPartitions);
+        assertEquals("testCatalogName", getSplitsResponse.getCatalogName());
+    }
 
     @Test
     public void decodeContinuationToken() throws Exception
@@ -285,13 +367,14 @@ public class HiveMetadataHandlerTest
         String[] schema = {"data_type", "col_name"};
         Object[][] values = {{"INTEGER", "case_number"}, {"VARCHAR", "case_location"},
                 {"TIMESTAMP","case_instance"},  {"DATE","case_date"}, {"BINARY","case_binary"}, {"DOUBLE","case_double"},
-                {"FLOAT","case_float"},  {"BOOLEAN","case_boolean"}};
+                {"FLOAT","case_float"},  {"BOOLEAN","case_boolean"}, {"INTERVAL", "case_unsupported"}};
         AtomicInteger rowNumber = new AtomicInteger(-1);
         ResultSet resultSet = mockResultSet(schema, values, rowNumber);
         String[] schema1 = {"DATA_TYPE", "COLUMN_SIZE", "COLUMN_NAME", "DECIMAL_DIGITS", "NUM_PREC_RADIX"};
         Object[][] values1 = {{Types.INTEGER, 12, "case_number", 0, 0}, {Types.VARCHAR, 25, "case_location", 0, 0},
                 {Types.TIMESTAMP, 93, "case_instance", 0, 0}, {Types.DATE, 91, "case_date", 0, 0},{Types.VARBINARY, 91, "case_binary", 0, 0},
-                {Types.DOUBLE, 91, "case_double", 0, 0},{Types.FLOAT, 91, "case_float", 0, 0}, {Types.BOOLEAN, 1, "case_boolean", 0, 0}};
+                {Types.DOUBLE, 91, "case_double", 0, 0},{Types.FLOAT, 91, "case_float", 0, 0}, {Types.BOOLEAN, 1, "case_boolean", 0, 0},
+                {Types.OTHER, 12, "case_unsupported", 0, 0}};
         ResultSet resultSet1 = mockResultSet(schema1, values1, new AtomicInteger(-1));
         TableName inputTableName = new TableName("TESTSCHEMA", "TESTTABLE");
         PreparedStatement preparestatement1 = Mockito.mock(PreparedStatement.class);
@@ -304,6 +387,17 @@ public class HiveMetadataHandlerTest
                 this.blockAllocator, new GetTableRequest(this.federatedIdentity, "testQueryId", "testCatalog", inputTableName, Collections.emptyMap()));
         assertEquals(inputTableName, getTableResponse.getTableName());
         assertEquals("testCatalog", getTableResponse.getCatalogName());
+        
+        // Verify that the schema contains the expected field types
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.INT.getType(), getTableResponse.getSchema().findField("case_number").getType());
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType(), getTableResponse.getSchema().findField("case_location").getType());
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.DATEMILLI.getType(), getTableResponse.getSchema().findField("case_instance").getType());
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.DATEDAY.getType(), getTableResponse.getSchema().findField("case_date").getType());
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.VARBINARY.getType(), getTableResponse.getSchema().findField("case_binary").getType());
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.FLOAT8.getType(), getTableResponse.getSchema().findField("case_double").getType());
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.FLOAT4.getType(), getTableResponse.getSchema().findField("case_float").getType());
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.BIT.getType(), getTableResponse.getSchema().findField("case_boolean").getType());
+        assertEquals(org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType(), getTableResponse.getSchema().findField("case_unsupported").getType());
     }
 
     @Test
