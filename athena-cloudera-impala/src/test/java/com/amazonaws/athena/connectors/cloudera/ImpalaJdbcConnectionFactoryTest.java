@@ -1,4 +1,4 @@
-package com.amazonaws.athena.connectors.cloudera;/*-
+/*-
  * #%L
  * athena-cloudera-impala
  * %%
@@ -17,7 +17,7 @@ package com.amazonaws.athena.connectors.cloudera;/*-
  * limitations under the License.
  * #L%
  */
-
+package com.amazonaws.athena.connectors.cloudera;
 import com.amazonaws.athena.connector.credentials.DefaultCredentials;
 import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.amazonaws.athena.connector.credentials.StaticCredentialsProvider;
@@ -32,6 +32,8 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Map;
 
+import static org.junit.Assert.assertEquals;
+
 public class ImpalaJdbcConnectionFactoryTest {
     @Test(expected = RuntimeException.class)
     public void getConnectionTest() throws ClassNotFoundException, SQLException {
@@ -45,6 +47,44 @@ public class ImpalaJdbcConnectionFactoryTest {
         String originalURL = connection.getMetaData().getURL();
         Driver drv = DriverManager.getDriver(originalURL);
         String driverClass = drv.getClass().getName();
-        Assert.assertEquals("com.cloudera.impala.jdbc.Driver", driverClass);
+        assertEquals("com.cloudera.impala.jdbc.Driver", driverClass);
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testGetConnection_withNullCredentials() throws Exception
+    {
+        // Setup the connection config with a test JDBC string
+        String testJdbcString = "jdbc:impala://localhost:10000/default";
+        DatabaseConnectionConfig databaseConnectionConfig = new DatabaseConnectionConfig(
+                "testCatalog",
+                ImpalaConstants.IMPALA_NAME,
+                testJdbcString,
+                "default"
+        );
+
+        // Setup other required parameters
+        ImpalaJdbcConnectionFactory connectionFactory = getImpalaJdbcConnectionFactory(databaseConnectionConfig);
+
+        // Attempt to get connection with null credentials - this should use the original JDBC string
+        Connection connection = connectionFactory.getConnection(null);
+
+        // Verify the connection URL matches the original JDBC string
+        assertEquals(testJdbcString, connection.getMetaData().getURL());
+    }
+
+    private static ImpalaJdbcConnectionFactory getImpalaJdbcConnectionFactory(DatabaseConnectionConfig databaseConnectionConfig)
+    {
+        Map<String, String> jdbcProperties = ImmutableMap.of("databaseTerm", "SCHEMA");
+        DatabaseConnectionInfo databaseConnectionInfo = new DatabaseConnectionInfo(
+                ImpalaConstants.IMPALA_DRIVER_CLASS,
+                ImpalaConstants.IMPALA_DEFAULT_PORT
+        );
+
+        // Create the connection factory and attempt to get a connection with null credentials
+        return new ImpalaJdbcConnectionFactory(
+                databaseConnectionConfig,
+                jdbcProperties,
+                databaseConnectionInfo
+        );
     }
 }

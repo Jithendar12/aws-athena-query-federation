@@ -32,6 +32,7 @@ import com.amazonaws.athena.connectors.jdbc.connection.DatabaseConnectionConfig;
 import com.amazonaws.athena.connectors.jdbc.connection.JdbcConnectionFactory;
 import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.amazonaws.athena.connectors.jdbc.manager.JdbcSplitQueryBuilder;
+import com.amazonaws.athena.connectors.jdbc.qpt.JdbcQueryPassthrough;
 import software.amazon.awssdk.services.athena.AthenaClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
@@ -51,9 +52,11 @@ import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static com.amazonaws.athena.connectors.cloudera.ImpalaConstants.IMPALA_QUOTE_CHARACTER;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.nullable;
 
 
@@ -131,9 +134,50 @@ public class ImpalaRecordHandlerTest
         Mockito.when(this.connection.prepareStatement(nullable(String.class))).thenReturn(expectedPreparedStatement);
         PreparedStatement preparedStatement = this.impalaRecordHandler.buildSplitSql(this.connection, "testCatalogName", tableName, schema, constraints, split);
         Assert.assertEquals(expectedPreparedStatement, preparedStatement);
-        Date expectedDate = new Date(120, 0, 5);
+        Date expectedDate = new Date(120, 0, 4);
         Assert.assertEquals(expectedPreparedStatement, preparedStatement);
         Mockito.verify(preparedStatement, Mockito.times(1))
                 .setDate(1, expectedDate);
+    }
+
+    @Test
+    public void testBuildSplitSql_withQueryPassthrough()
+    {
+        try {
+            TableName tableName = new TableName("testSchema", "testTable");
+
+            SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
+            schemaBuilder.addField(FieldBuilder.newBuilder("testCol1", Types.MinorType.INT.getType()).build());
+            schemaBuilder.addField(FieldBuilder.newBuilder("partition", Types.MinorType.VARCHAR.getType()).build());
+            Schema schema = schemaBuilder.build();
+
+            Split split = Mockito.mock(Split.class);
+            Mockito.when(split.getProperties()).thenReturn(Collections.singletonMap("partition", "p0"));
+            Mockito.when(split.getProperty(Mockito.eq("partition"))).thenReturn("p0");
+
+            Constraints constraints = Mockito.mock(Constraints.class);
+            Mockito.when(constraints.isQueryPassThrough()).thenReturn(true);
+
+            Map<String, String> queryPassthroughArgs = new ImmutableMap.Builder<String, String>()
+                    .put(JdbcQueryPassthrough.QUERY, "SELECT * FROM testSchema.testTable WHERE testCol1 = 1")
+                    .put("schemaFunctionName", "system.query")
+                    .put("enableQueryPassthrough", "true")
+                    .put("name", "query")
+                    .put("schema", "system")
+                    .build();
+
+            Mockito.when(constraints.getQueryPassthroughArguments()).thenReturn(queryPassthroughArgs);
+
+            PreparedStatement expectedPreparedStatement = Mockito.mock(PreparedStatement.class);
+            Mockito.when(this.connection.prepareStatement(nullable(String.class))).thenReturn(expectedPreparedStatement);
+
+            PreparedStatement preparedStatement = this.impalaRecordHandler.buildSplitSql(this.connection, "testCatalogName", tableName, schema, constraints, split);
+
+            Assert.assertEquals(expectedPreparedStatement, preparedStatement);
+            Mockito.verify(this.connection).prepareStatement("SELECT * FROM testSchema.testTable WHERE testCol1 = 1");
+        }
+        catch (Exception e) {
+            fail("Unexpected exception:" + e.getMessage());
+        }
     }
 }
