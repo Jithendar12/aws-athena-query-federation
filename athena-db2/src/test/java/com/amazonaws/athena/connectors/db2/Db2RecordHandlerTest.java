@@ -19,6 +19,7 @@
  */
 package com.amazonaws.athena.connectors.db2;
 
+import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.amazonaws.athena.connector.lambda.data.FieldBuilder;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
@@ -29,8 +30,8 @@ import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.ValueSet;
 import com.amazonaws.athena.connectors.jdbc.connection.DatabaseConnectionConfig;
 import com.amazonaws.athena.connectors.jdbc.connection.JdbcConnectionFactory;
-import com.amazonaws.athena.connector.credentials.CredentialsProvider;
 import com.amazonaws.athena.connectors.jdbc.manager.JdbcSplitQueryBuilder;
+import com.amazonaws.athena.connectors.jdbc.qpt.JdbcQueryPassthrough;
 import com.google.common.collect.ImmutableMap;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -46,12 +47,22 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Collections;
+import java.util.Map;
 
 import static com.amazonaws.athena.connectors.db2.Db2Constants.PARTITION_NUMBER;
 import static com.amazonaws.athena.connectors.db2.Db2Constants.QUOTE_CHARACTER;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.nullable;
 
-public class Db2RecordHandlerTest {
+public class Db2RecordHandlerTest
+{
+    private static final String TEST_CATALOG = "testCatalog";
+    private static final String TEST_SCHEMA = "testSchema";
+    private static final String TEST_TABLE = "testTable";
+    private static final String TEST_COL1 = "testCol1";
+    private static final String TEST_PARTITION = "partition_name";
+    private static final String TEST_PARTITION_VALUE = "partition_value";
+
     private Db2RecordHandler db2RecordHandler;
     private Connection connection;
     private JdbcConnectionFactory jdbcConnectionFactory;
@@ -61,7 +72,8 @@ public class Db2RecordHandlerTest {
     private AthenaClient athena;
 
     @Before
-    public void setup() throws Exception {
+    public void setup() throws Exception
+    {
         System.setProperty("aws.region", "us-east-1");
         this.amazonS3 = Mockito.mock(S3Client.class);
         this.secretsManager = Mockito.mock(SecretsManagerClient.class);
@@ -75,7 +87,8 @@ public class Db2RecordHandlerTest {
         this.db2RecordHandler = new Db2RecordHandler(databaseConnectionConfig, amazonS3, secretsManager, athena, jdbcConnectionFactory, jdbcSplitQueryBuilder, com.google.common.collect.ImmutableMap.of());
     }
 
-    private ValueSet getSingleValueSet(Object value) {
+    private ValueSet getSingleValueSet(Object value)
+    {
         Range range = Mockito.mock(Range.class, Mockito.RETURNS_DEEP_STUBS);
         Mockito.when(range.isSingleValue()).thenReturn(true);
         Mockito.when(range.getLow().getValue()).thenReturn(value);
@@ -88,13 +101,15 @@ public class Db2RecordHandlerTest {
     public void buildSplitSqlNew()
             throws SQLException
     {
-        TableName tableName = new TableName("testSchema", "testTable");
+        final String testCol4 = "testCol4";
+
+        TableName tableName = new TableName(TEST_SCHEMA, TEST_TABLE);
 
         SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
-        schemaBuilder.addField(FieldBuilder.newBuilder("testCol1", Types.MinorType.INT.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder(TEST_COL1, Types.MinorType.INT.getType()).build());
         schemaBuilder.addField(FieldBuilder.newBuilder("testCol2", Types.MinorType.DATEDAY.getType()).build());
         schemaBuilder.addField(FieldBuilder.newBuilder("testCol3", Types.MinorType.DATEMILLI.getType()).build());
-        schemaBuilder.addField(FieldBuilder.newBuilder("testCol4", Types.MinorType.VARCHAR.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder(testCol4, Types.MinorType.VARCHAR.getType()).build());
         Schema schema = schemaBuilder.build();
 
         Split split = Mockito.mock(Split.class);
@@ -103,14 +118,57 @@ public class Db2RecordHandlerTest {
         ValueSet valueSet = getSingleValueSet("varcharTest");
         Constraints constraints = Mockito.mock(Constraints.class);
         Mockito.when(constraints.getSummary()).thenReturn(new ImmutableMap.Builder<String, ValueSet>()
-                .put("testCol4", valueSet)
+                .put(testCol4, valueSet)
                 .build());
 
-        String expectedSql = "SELECT \"testCol1\", \"testCol2\", \"testCol3\", \"testCol4\" FROM \"testSchema\".\"testTable\"  WHERE (\"testCol4\" = ?)";
+        String expectedSql = String.format("SELECT \"%s\", \"testCol2\", \"testCol3\", \"%s\" FROM \"%s\".\"%s\"  WHERE (\"%s\" = ?)", 
+                TEST_COL1, testCol4, TEST_SCHEMA, TEST_TABLE, testCol4);
         PreparedStatement expectedPreparedStatement = Mockito.mock(PreparedStatement.class);
         Mockito.when(this.connection.prepareStatement(Mockito.eq(expectedSql))).thenReturn(expectedPreparedStatement);
-        PreparedStatement preparedStatement = this.db2RecordHandler.buildSplitSql(this.connection, "testCatalogName", tableName, schema, constraints, split);
+        PreparedStatement preparedStatement = this.db2RecordHandler.buildSplitSql(this.connection, TEST_CATALOG, tableName, schema, constraints, split);
         Assert.assertEquals(expectedPreparedStatement, preparedStatement);
         Mockito.verify(preparedStatement, Mockito.times(1)).setString(1, "varcharTest");
+    }
+
+    @Test
+    public void testBuildSplitSql_withQueryPassthrough()
+    {
+        try {
+            TableName tableName = new TableName(TEST_SCHEMA, TEST_TABLE);
+
+            SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
+            schemaBuilder.addField(FieldBuilder.newBuilder(TEST_COL1, Types.MinorType.INT.getType()).build());
+            schemaBuilder.addField(FieldBuilder.newBuilder(TEST_PARTITION, Types.MinorType.VARCHAR.getType()).build());
+            Schema schema = schemaBuilder.build();
+
+            Split split = Mockito.mock(Split.class);
+            Mockito.when(split.getProperties()).thenReturn(Collections.singletonMap(TEST_PARTITION, TEST_PARTITION_VALUE));
+            Mockito.when(split.getProperty(Mockito.eq(TEST_PARTITION))).thenReturn(TEST_PARTITION_VALUE);
+
+            Constraints constraints = Mockito.mock(Constraints.class);
+            Mockito.when(constraints.isQueryPassThrough()).thenReturn(true);
+
+            String testQuery = String.format("SELECT * FROM %s.%s WHERE %s = 1", TEST_SCHEMA, TEST_TABLE, TEST_COL1);
+            Map<String, String> queryPassthroughArgs = new ImmutableMap.Builder<String, String>()
+                    .put(JdbcQueryPassthrough.QUERY, testQuery)
+                    .put("schemaFunctionName", "system.query")
+                    .put("enableQueryPassthrough", "true")
+                    .put("name", "query")
+                    .put("schema", "system")
+                    .build();
+
+            Mockito.when(constraints.getQueryPassthroughArguments()).thenReturn(queryPassthroughArgs);
+
+            PreparedStatement expectedPreparedStatement = Mockito.mock(PreparedStatement.class);
+            Mockito.when(this.connection.prepareStatement(nullable(String.class))).thenReturn(expectedPreparedStatement);
+
+            PreparedStatement preparedStatement = this.db2RecordHandler.buildSplitSql(this.connection, TEST_CATALOG, tableName, schema, constraints, split);
+
+            Assert.assertEquals(expectedPreparedStatement, preparedStatement);
+            Mockito.verify(this.connection).prepareStatement(testQuery);
+        }
+        catch (Exception e) {
+            fail("Unexpected exception:" + e.getMessage());
+        }
     }
 }
