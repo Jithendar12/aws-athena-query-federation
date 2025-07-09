@@ -26,6 +26,7 @@ import com.amazonaws.athena.connector.lambda.data.BlockUtils;
 import com.amazonaws.athena.connector.lambda.data.S3BlockSpillReader;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
+import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
@@ -65,17 +66,16 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import software.amazon.awssdk.services.athena.AthenaClient;
-import software.amazon.awssdk.services.glue.GlueClient;
-import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
-
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.athena.AthenaClient;
+import software.amazon.awssdk.services.glue.GlueClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
+import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -86,14 +86,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static com.amazonaws.athena.connectors.docdb.DocDBMetadataHandler.DOCDB_CONN_STR;
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
-import static org.junit.Assert.*;
+import static com.amazonaws.athena.connectors.docdb.DocDBMetadataHandler.DOCDB_CONN_STR;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -191,7 +194,7 @@ public class DocDBRecordHandlerTest
                     byteHolder.setBytes(ByteStreams.toByteArray(inputStream));
                     synchronized (mockS3Storage) {
                         mockS3Storage.add(byteHolder);
-                        logger.info("puObject: total size " + mockS3Storage.size());
+                        logger.info("puObject: total size {}", mockS3Storage.size());
                     }
                     return PutObjectResponse.builder().build();
                 });
@@ -202,7 +205,7 @@ public class DocDBRecordHandlerTest
                     synchronized (mockS3Storage) {
                         byteHolder = mockS3Storage.get(0);
                         mockS3Storage.remove(0);
-                        logger.info("getObject: total size " + mockS3Storage.size());
+                        logger.info("getObject: total size {}", mockS3Storage.size());
                     }
                     return new ResponseInputStream<>(GetObjectResponse.builder().build(), new ByteArrayInputStream(byteHolder.getBytes()));
                 });
@@ -237,7 +240,7 @@ public class DocDBRecordHandlerTest
         Document doc3 = DocumentGenerator.makeRandomRow(schemaForRead.getFields(), docNum++);
         documents.add(doc3);
         doc3.put("col3", 21.0D);
-        doc3.put("unsupported",new UnsupportedType());
+        doc3.put("unsupported", new UnsupportedType());
 
         when(mockCollection.find(nullable(Document.class))).thenAnswer((InvocationOnMock invocationOnMock) -> {
             logger.info("doReadRecordsNoSpill: query[{}]", invocationOnMock.getArguments()[0]);
@@ -274,12 +277,12 @@ public class DocDBRecordHandlerTest
 
         RecordResponse rawResponse = handler.doReadRecords(allocator, request);
 
-        assertTrue(rawResponse instanceof ReadRecordsResponse);
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
 
         ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
         logger.info("doReadRecordsNoSpill: rows[{}]", response.getRecordCount());
 
-        assertTrue(response.getRecords().getRowCount() == 2);
+        assertEquals("Record count should be 2", 2, response.getRecords().getRowCount());
         logger.info("doReadRecordsNoSpill: {}", BlockUtils.rowToString(response.getRecords(), 0));
     }
 
@@ -327,23 +330,22 @@ public class DocDBRecordHandlerTest
         );
         RecordResponse rawResponse = handler.doReadRecords(allocator, request);
 
-        assertTrue(rawResponse instanceof RemoteReadRecordsResponse);
+        assertTrue("Response should be RemoteReadRecordsResponse", rawResponse instanceof RemoteReadRecordsResponse);
 
         try (RemoteReadRecordsResponse response = (RemoteReadRecordsResponse) rawResponse) {
             logger.info("doReadRecordsSpill: remoteBlocks[{}]", response.getRemoteBlocks().size());
 
-            assertTrue(response.getNumberBlocks() > 1);
+            assertTrue("Number of blocks should be greater than 1", response.getNumberBlocks() > 1);
 
             int blockNum = 0;
             for (SpillLocation next : response.getRemoteBlocks()) {
                 S3SpillLocation spillLocation = (S3SpillLocation) next;
                 try (Block block = spillReader.read(spillLocation, response.getEncryptionKey(), response.getSchema())) {
-
                     logger.info("doReadRecordsSpill: blockNum[{}] and recordCount[{}]", blockNum++, block.getRowCount());
                     // assertTrue(++blockNum < response.getRemoteBlocks().size() && block.getRowCount() > 10_000);
 
                     logger.info("doReadRecordsSpill: {}", BlockUtils.rowToString(block, 0));
-                    assertNotNull(BlockUtils.rowToString(block, 0));
+                    assertNotNull("Row string should not be null", BlockUtils.rowToString(block, 0));
                 }
             }
         }
@@ -406,7 +408,6 @@ public class DocDBRecordHandlerTest
         when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
         when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
 
-
         Map<String, ValueSet> constraintsMap = new HashMap<>();
         S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
                 .withBucket(UUID.randomUUID().toString())
@@ -428,12 +429,12 @@ public class DocDBRecordHandlerTest
 
         RecordResponse rawResponse = handler.doReadRecords(allocator, request);
 
-        assertTrue(rawResponse instanceof ReadRecordsResponse);
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
 
         ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
         logger.info("doReadRecordsNoSpill: rows[{}]", response.getRecordCount());
         logger.info("doReadRecordsNoSpill: {}", BlockUtils.rowToString(response.getRecords(), 0));
-        assertTrue(response.getRecordCount() == 1);
+        assertEquals("Record count should be 1", 1, response.getRecordCount());
         String expectedString = "[ComplexStruct : {[SomeList : {{[SomeSubStruct : someSubStruct1]," +
                 "[SomeSubList : {{[SomeSubSubStruct : someSubSubStruct]}}]}," +
                 "{[SomeSubStruct : someSubStruct1],[SomeSubList : {{[SomeSubSubStruct : someSubSubStruct]}}]}}]," +
@@ -463,7 +464,7 @@ public class DocDBRecordHandlerTest
         when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
         when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
 
-        GetTableRequest req = new GetTableRequest(IDENTITY, QUERY_ID, DEFAULT_CATALOG, TABLE_NAME,Collections.emptyMap());
+        GetTableRequest req = new GetTableRequest(IDENTITY, QUERY_ID, DEFAULT_CATALOG, TABLE_NAME, Collections.emptyMap());
         GetTableResponse res = mdHandler.doGetTable(allocator, req);
         logger.info("doGetTable - {}", res);
 
@@ -477,7 +478,6 @@ public class DocDBRecordHandlerTest
         });
         when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
         when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
-
 
         Map<String, ValueSet> constraintsMap = new HashMap<>();
         S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
@@ -493,21 +493,106 @@ public class DocDBRecordHandlerTest
                 TABLE_NAME,
                 res.getSchema(),
                 Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
-                new Constraints(constraintsMap,Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
                 100_000_000_000L, //100GB don't expect this to spill
                 100_000_000_000L
         );
 
         RecordResponse rawResponse = handler.doReadRecords(allocator, request);
 
-        assertTrue(rawResponse instanceof ReadRecordsResponse);
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
 
         ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
         logger.info("doReadRecordsNoSpill: rows[{}]", response.getRecordCount());
         logger.info("doReadRecordsNoSpill: {}", BlockUtils.rowToString(response.getRecords(), 0));
-        assertTrue(response.getRecordCount() == 1);
+        assertEquals("Record count should be 1", 1, response.getRecordCount());
         String expectedString = "[DbRef : {[_db : otherDb],[_ref : otherColl],[_id : " + id.toHexString() + "]}], [SimpleStruct : {[SomeSimpleStruct : someSimpleStruct]}]";
         assertEquals(expectedString, BlockUtils.rowToString(response.getRecords(), 0));
+    }
+
+    @Test
+    public void testDoReadRecords_withQueryPassthrough()
+            throws Exception
+    {
+        List<Document> documents = new ArrayList<>();
+        Document doc1 = new Document();
+        documents.add(doc1);
+        doc1.put("title", "Bill of Rights");
+        doc1.put("year", 1791);
+        doc1.put("type", "document");
+
+        // Mock setup for database and collection
+        MongoDatabase mockQptDatabase = mock(MongoDatabase.class);
+        MongoCollection mockQptCollection = mock(MongoCollection.class);
+        FindIterable mockQptIterable = mock(FindIterable.class);
+
+        // Setup mocks for query passthrough
+        when(mockClient.getDatabase(eq("example"))).thenReturn(mockQptDatabase);
+        when(mockQptDatabase.getCollection(eq("tpcds"))).thenReturn(mockQptCollection);
+        when(mockQptCollection.find(any(Document.class))).thenReturn(mockQptIterable);
+        when(mockQptIterable.projection(any(Document.class))).thenReturn(mockQptIterable);
+        when(mockQptIterable.batchSize(anyInt())).thenReturn(mockQptIterable);
+        when(mockQptIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+
+        // Create schema for the test
+        Schema qptSchema = SchemaBuilder.newBuilder()
+                .addField("title", Types.MinorType.VARCHAR.getType())
+                .addField("year", Types.MinorType.INT.getType())
+                .addField("type", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        // Setup query passthrough parameters
+        Map<String, ValueSet> constraintsMap = new HashMap<>();
+        Map<String, String> qptParams = new HashMap<>();
+        qptParams.put("schemaFunctionName", "system.query");
+        qptParams.put("DATABASE", "example");
+        qptParams.put("COLLECTION", "tpcds");
+        qptParams.put("FILTER", "{\"title\": \"Bill of Rights\"}");
+        qptParams.put("enable_query_passthrough", "true");
+
+        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
+                .withBucket(UUID.randomUUID().toString())
+                .withSplitId(UUID.randomUUID().toString())
+                .withQueryId(UUID.randomUUID().toString())
+                .withIsDirectory(true)
+                .build();
+
+        // Create read request with query passthrough
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                IDENTITY,
+                DEFAULT_CATALOG,
+                "queryId-" + System.currentTimeMillis(),
+                new TableName("example", "tpcds"),
+                qptSchema,
+                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, qptParams, null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        // Execute the read
+        RecordResponse rawResponse = handler.doReadRecords(allocator, request);
+
+        // Verify the response
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+
+        // Verify record count
+        assertEquals(1, response.getRecordCount());
+
+        // Verify record content
+        Block records = response.getRecords();
+        String rowAsString = BlockUtils.rowToString(records, 0);
+        assertTrue("Title should be present in row", rowAsString.contains("Bill of Rights"));
+        assertTrue("Year should be present in row", rowAsString.contains("1791"));
+        assertTrue("Type should be present in row", rowAsString.contains("document"));
+
+        // Verify that the correct database and collection were queried
+        verify(mockClient).getDatabase("example");
+        verify(mockQptDatabase).getCollection("tpcds");
+
+        // Verify that the filter was applied
+        verify(mockQptCollection).find(eq(Document.parse("{\"title\": \"Bill of Rights\"}")));
     }
 
     private class ByteHolder
