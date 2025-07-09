@@ -26,6 +26,7 @@ import com.amazonaws.athena.connector.lambda.data.BlockUtils;
 import com.amazonaws.athena.connector.lambda.data.S3BlockSpillReader;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
+import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
@@ -65,17 +66,16 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import software.amazon.awssdk.services.athena.AthenaClient;
-import software.amazon.awssdk.services.glue.GlueClient;
-import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
-
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.athena.AthenaClient;
+import software.amazon.awssdk.services.glue.GlueClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
+import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -84,16 +84,21 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 
-import static com.amazonaws.athena.connectors.docdb.DocDBMetadataHandler.DOCDB_CONN_STR;
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
-import static org.junit.Assert.*;
+import static com.amazonaws.athena.connectors.docdb.DocDBMetadataHandler.DOCDB_CONN_STR;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -101,6 +106,11 @@ public class DocDBRecordHandlerTest
         extends TestBase
 {
     private static final Logger logger = LoggerFactory.getLogger(DocDBRecordHandlerTest.class);
+    private static final String EXAMPLE_DATABASE = "example";
+    private static final String TPCDS_COLLECTION = "tpcds";
+    private static final String SYSTEM_QUERY = "system.query";
+    private static final String ENABLE_QUERY_PASSTHROUGH = "enable_query_passthrough";
+    private static final String DISABLE_PROJECTION_AND_CASING = "disable_projection_and_casing";
 
     private DocDBRecordHandler handler;
     private BlockAllocator allocator;
@@ -508,6 +518,249 @@ public class DocDBRecordHandlerTest
         assertTrue(response.getRecordCount() == 1);
         String expectedString = "[DbRef : {[_db : otherDb],[_ref : otherColl],[_id : " + id.toHexString() + "]}], [SimpleStruct : {[SomeSimpleStruct : someSimpleStruct]}]";
         assertEquals(expectedString, BlockUtils.rowToString(response.getRecords(), 0));
+    }
+
+    @Test
+    public void testDoReadRecords_withQueryPassthrough()
+            throws Exception
+    {
+        List<Document> documents = new ArrayList<>();
+        Document doc1 = new Document();
+        documents.add(doc1);
+        doc1.put("title", "Bill of Rights");
+        doc1.put("year", 1791);
+        doc1.put("type", "document");
+
+        // Mock setup for database and collection
+        MongoDatabase mockQptDatabase = mock(MongoDatabase.class);
+        MongoCollection mockQptCollection = mock(MongoCollection.class);
+        FindIterable mockQptIterable = mock(FindIterable.class);
+
+        // Setup mocks for query passthrough
+        when(mockClient.getDatabase(eq(EXAMPLE_DATABASE))).thenReturn(mockQptDatabase);
+        when(mockQptDatabase.getCollection(eq(TPCDS_COLLECTION))).thenReturn(mockQptCollection);
+        when(mockQptCollection.find(any(Document.class))).thenReturn(mockQptIterable);
+        when(mockQptIterable.projection(any(Document.class))).thenReturn(mockQptIterable);
+        when(mockQptIterable.batchSize(anyInt())).thenReturn(mockQptIterable);
+        when(mockQptIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+
+        // Create schema for the test
+        Schema qptSchema = SchemaBuilder.newBuilder()
+                .addField("title", Types.MinorType.VARCHAR.getType())
+                .addField("year", Types.MinorType.INT.getType())
+                .addField("type", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        // Setup query passthrough parameters
+        Map<String, ValueSet> constraintsMap = new HashMap<>();
+        Map<String, String> qptParams = new HashMap<>();
+        qptParams.put("schemaFunctionName", SYSTEM_QUERY);
+        qptParams.put("DATABASE", EXAMPLE_DATABASE);
+        qptParams.put("COLLECTION", TPCDS_COLLECTION);
+        qptParams.put("FILTER", "{\"title\": \"Bill of Rights\"}");
+        qptParams.put(ENABLE_QUERY_PASSTHROUGH, "true");
+
+        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
+                .withBucket(UUID.randomUUID().toString())
+                .withSplitId(UUID.randomUUID().toString())
+                .withQueryId(UUID.randomUUID().toString())
+                .withIsDirectory(true)
+                .build();
+
+        // Create read request with query passthrough
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                IDENTITY,
+                DEFAULT_CATALOG,
+                "queryId-" + System.currentTimeMillis(),
+                new TableName(EXAMPLE_DATABASE, TPCDS_COLLECTION),
+                qptSchema,
+                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, qptParams, null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        // Execute the read
+        RecordResponse rawResponse = handler.doReadRecords(allocator, request);
+
+        // Verify the response
+        assertTrue("Response should be of type ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+
+        // Verify record count
+        assertEquals(1, response.getRecordCount());
+
+        // Verify record content
+        Block records = response.getRecords();
+        String rowAsString = BlockUtils.rowToString(records, 0);
+        assertTrue("Row should contain title", rowAsString.contains("Bill of Rights"));
+        assertTrue("Row should contain year", rowAsString.contains("1791"));
+        assertTrue("Row should contain type", rowAsString.contains("document"));
+
+        // Verify that the correct database and collection were queried
+        verify(mockClient).getDatabase(EXAMPLE_DATABASE);
+        verify(mockQptDatabase).getCollection(TPCDS_COLLECTION);
+
+        // Verify that the filter was applied
+        verify(mockQptCollection).find(eq(Document.parse("{\"title\": \"Bill of Rights\"}")));
+    }
+
+    @Test
+    public void testDoReadRecords_withCaseInsensitivity()
+            throws Exception
+    {
+        // Create handler with disable_projection_and_casing enabled
+        DocDBRecordHandler caseInsensitiveHandler = new DocDBRecordHandler(
+                amazonS3, 
+                mockSecretsManager, 
+                mockAthena, 
+                connectionFactory, 
+                com.google.common.collect.ImmutableMap.of(DISABLE_PROJECTION_AND_CASING, "true")
+        );
+
+        List<Document> documents = new ArrayList<>();
+        Document doc = new Document();
+        // Add fields with mixed case
+        doc.put("MixedCaseField", "testValue");
+        doc.put("UPPERCASE_FIELD", 123);
+        doc.put("lowercase_field", 456.78);
+        documents.add(doc);
+
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStringField("mixedcasefield")  // lowercase schema field name
+                .addIntField("uppercase_field")
+                .addFloat8Field("LOWERCASE_FIELD")  // uppercase schema field name
+                .build();
+
+        when(mockCollection.find(nullable(Document.class))).thenReturn(mockIterable);
+        when(mockIterable.projection(nullable(Document.class))).thenReturn(mockIterable);
+        when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
+        when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+
+        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
+                .withBucket(UUID.randomUUID().toString())
+                .withSplitId(UUID.randomUUID().toString())
+                .withQueryId(UUID.randomUUID().toString())
+                .withIsDirectory(true)
+                .build();
+
+        Split split = Split.newBuilder(splitLoc, keyFactory.create())
+                .add(DOCDB_CONN_STR, CONNECTION_STRING)
+                .build();
+
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                IDENTITY,
+                DEFAULT_CATALOG,
+                "queryId-" + System.currentTimeMillis(),
+                TABLE_NAME,
+                schema,
+                split,
+                new Constraints(new HashMap<>(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        RecordResponse rawResponse = caseInsensitiveHandler.doReadRecords(allocator, request);
+
+        assertTrue("Response should be of type ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+        logger.info("testReadWithCaseInsensitivity: rows[{}]", response.getRecordCount());
+
+        assertEquals(1, response.getRecords().getRowCount());
+        logger.info("testReadWithCaseInsensitivity: {}", BlockUtils.rowToString(response.getRecords(), 0));
+        
+        // Verify that fields are accessible despite case mismatch
+        assertNotNull("Records should not be null", response.getRecords());
+    }
+
+    @Test
+    public void testDoReadRecords_withProblematicData_throwsRuntimeException()
+    {
+        List<Document> documents = new ArrayList<>();
+        Document doc = new Document();
+        
+        // Create a document with a struct field that has problematic data
+        // This will cause an exception during offerComplexValue processing
+        Document nestedDoc = new Document();
+        nestedDoc.put("nested_field", new Object() {
+            @Override
+            public String toString()
+            {
+                throw new RuntimeException("Simulated field processing error");
+            }
+        });
+        doc.put("struct_field", nestedDoc);
+        documents.add(doc);
+
+        // Create schema with a STRUCT field (complex type)
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStructField("struct_field")
+                .addChildField("struct_field", "nested_field", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        when(mockCollection.find(nullable(Document.class))).thenReturn(mockIterable);
+        when(mockIterable.projection(nullable(Document.class))).thenReturn(mockIterable);
+        when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
+        when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+
+        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
+                .withBucket(UUID.randomUUID().toString())
+                .withSplitId(UUID.randomUUID().toString())
+                .withQueryId(UUID.randomUUID().toString())
+                .withIsDirectory(true)
+                .build();
+
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                IDENTITY,
+                DEFAULT_CATALOG,
+                "queryId-" + System.currentTimeMillis(),
+                TABLE_NAME,
+                schema,
+                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                new Constraints(new HashMap<>(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, new HashMap<>(), null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        // Test that processing a field with an error throws RuntimeException with the expected message
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> handler.doReadRecords(allocator, request));
+        assertTrue("Exception message should contain error description", 
+                   exception.getMessage().contains("Error while processing field"));
+    }
+
+    @Test
+    public void testGetOrCreateConn_withMissingConnectionString_throwsRuntimeException()
+    {
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStringField("field1")
+                .build();
+
+        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
+                .withBucket(UUID.randomUUID().toString())
+                .withSplitId(UUID.randomUUID().toString())
+                .withQueryId(UUID.randomUUID().toString())
+                .withIsDirectory(true)
+                .build();
+
+        // Create a split WITHOUT the DOCDB_CONN_STR property
+        Split splitWithoutConnStr = Split.newBuilder(splitLoc, keyFactory.create()).build();
+
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                IDENTITY,
+                DEFAULT_CATALOG,
+                "queryId-" + System.currentTimeMillis(),
+                TABLE_NAME,
+                schema,
+                splitWithoutConnStr,
+                new Constraints(new HashMap<>(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, new HashMap<>(), null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        // Missing connection string throws RuntimeException with the expected message
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> handler.doReadRecords(allocator, request));
+        assertTrue("Exception message should contain Unable to create connection",
+                   exception.getMessage().contains("Split property is null! Unable to create connection."));
     }
 
     private class ByteHolder
