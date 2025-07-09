@@ -25,7 +25,8 @@ import org.junit.Test;
 
 import java.io.IOException;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -54,5 +55,54 @@ public class DocDBConnectionFactoryTest
 
         assertEquals(mockConn, conn);
         verify(mockConn, times(1)).listDatabaseNames();
+    }
+
+    @Test
+    public void testSSLConnection()
+    {
+        String sslConnStr = "mongodb://localhost:27017/?ssl=true";
+        String originalTrustStoreType = System.getProperty("javax.net.ssl.trustStoreType");
+        String originalTrustStorePassword = System.getProperty("javax.net.ssl.trustStorePassword");
+        
+        try {
+            System.clearProperty("javax.net.ssl.trustStoreType");
+            System.clearProperty("javax.net.ssl.trustStorePassword");
+            
+            connectionFactory.getOrCreateConn(sslConnStr);
+            
+            assertEquals("JKS", System.getProperty("javax.net.ssl.trustStoreType"));
+            assertEquals("changeit", System.getProperty("javax.net.ssl.trustStorePassword"));
+        }
+        finally {
+            // Restore original system properties
+            if (originalTrustStoreType != null) {
+                System.setProperty("javax.net.ssl.trustStoreType", originalTrustStoreType);
+            }
+            else {
+                System.clearProperty("javax.net.ssl.trustStoreType");
+            }
+            if (originalTrustStorePassword != null) {
+                System.setProperty("javax.net.ssl.trustStorePassword", originalTrustStorePassword);
+            }
+            else {
+                System.clearProperty("javax.net.ssl.trustStorePassword");
+            }
+        }
+    }
+
+    @Test
+    public void testConnectionFailure()
+    {
+        MongoClient mockConn = mock(MongoClient.class);
+        when(mockConn.listDatabaseNames()).thenThrow(new RuntimeException("Test exception"));
+
+        String connStr = "mongodb://localhost:27017";
+        connectionFactory.addConnection(connStr, mockConn);
+        MongoClient result = connectionFactory.getOrCreateConn(connStr);
+
+        // Verify that the original connection was tested
+        verify(mockConn, times(1)).listDatabaseNames();
+        // Verify that we got a new connection (not our mock) since the test failed
+        assertNotEquals("Should create new connection when test fails", mockConn, result);
     }
 }

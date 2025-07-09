@@ -95,6 +95,8 @@ import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import com.amazonaws.athena.connector.lambda.domain.TableName;
 
 @RunWith(MockitoJUnitRunner.class)
 public class DocDBRecordHandlerTest
@@ -508,6 +510,91 @@ public class DocDBRecordHandlerTest
         assertTrue(response.getRecordCount() == 1);
         String expectedString = "[DbRef : {[_db : otherDb],[_ref : otherColl],[_id : " + id.toHexString() + "]}], [SimpleStruct : {[SomeSimpleStruct : someSimpleStruct]}]";
         assertEquals(expectedString, BlockUtils.rowToString(response.getRecords(), 0));
+    }
+
+    @Test
+    public void testDoReadRecords_withQueryPassthrough()
+            throws Exception
+    {
+        List<Document> documents = new ArrayList<>();
+        Document doc1 = new Document();
+        documents.add(doc1);
+        doc1.put("title", "Bill of Rights");
+        doc1.put("year", 1791);
+        doc1.put("type", "document");
+
+        // Mock setup for database and collection
+        MongoDatabase mockQptDatabase = mock(MongoDatabase.class);
+        MongoCollection mockQptCollection = mock(MongoCollection.class);
+        FindIterable mockQptIterable = mock(FindIterable.class);
+
+        // Setup mocks for query passthrough
+        when(mockClient.getDatabase(eq("example"))).thenReturn(mockQptDatabase);
+        when(mockQptDatabase.getCollection(eq("tpcds"))).thenReturn(mockQptCollection);
+        when(mockQptCollection.find(any(Document.class))).thenReturn(mockQptIterable);
+        when(mockQptIterable.projection(any(Document.class))).thenReturn(mockQptIterable);
+        when(mockQptIterable.batchSize(anyInt())).thenReturn(mockQptIterable);
+        when(mockQptIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+
+        // Create schema for the test
+        Schema qptSchema = SchemaBuilder.newBuilder()
+                .addField("title", Types.MinorType.VARCHAR.getType())
+                .addField("year", Types.MinorType.INT.getType())
+                .addField("type", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        // Setup query passthrough parameters
+        Map<String, ValueSet> constraintsMap = new HashMap<>();
+        Map<String, String> qptParams = new HashMap<>();
+        qptParams.put("schemaFunctionName", "system.query");
+        qptParams.put("DATABASE", "example");
+        qptParams.put("COLLECTION", "tpcds");
+        qptParams.put("FILTER", "{\"title\": \"Bill of Rights\"}");
+        qptParams.put("enable_query_passthrough", "true");
+
+        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
+                .withBucket(UUID.randomUUID().toString())
+                .withSplitId(UUID.randomUUID().toString())
+                .withQueryId(UUID.randomUUID().toString())
+                .withIsDirectory(true)
+                .build();
+
+        // Create read request with query passthrough
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                IDENTITY,
+                DEFAULT_CATALOG,
+                "queryId-" + System.currentTimeMillis(),
+                new TableName("example", "tpcds"),
+                qptSchema,
+                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, qptParams),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        // Execute the read
+        RecordResponse rawResponse = handler.doReadRecords(allocator, request);
+
+        // Verify the response
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+
+        // Verify record count
+        assertEquals("Should have 1 record", 1, response.getRecordCount());
+
+        // Verify record content
+        Block records = response.getRecords();
+        String rowAsString = BlockUtils.rowToString(records, 0);
+        assertTrue("Title should be present", rowAsString.contains("Bill of Rights"));
+        assertTrue("Year should be present", rowAsString.contains("1791"));
+        assertTrue("Type should be present", rowAsString.contains("document"));
+
+        // Verify that the correct database and collection were queried
+        verify(mockClient).getDatabase("example");
+        verify(mockQptDatabase).getCollection("tpcds");
+
+        // Verify that the filter was applied
+        verify(mockQptCollection).find(eq(Document.parse("{\"title\": \"Bill of Rights\"}")));
     }
 
     private class ByteHolder

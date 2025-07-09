@@ -20,6 +20,7 @@
 package com.amazonaws.athena.connectors.docdb;
 
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
+import com.amazonaws.athena.connector.lambda.domain.predicate.EquatableValueSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.ValueSet;
@@ -32,8 +33,11 @@ import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class QueryUtilsTest
@@ -62,7 +66,7 @@ public class QueryUtilsTest
                 new Document("year", new Document("$gte", 2010)),
                 new Document("year", new Document("$eq", 1952))
         ));
-        assertEquals(expected, result);
+        assertEquals(expected.toJson(), result.toJson());
     }
 
     @Test
@@ -80,7 +84,158 @@ public class QueryUtilsTest
         assertNotNull(result);
         Document expected =
                 new Document("_id", new Document("$eq", new ObjectId("4ecbe7f9e8c1c9092c000027")));
-        assertEquals(expected, result);
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void testMakePredicate_withEquatableValueSet()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a single value EquatableValueSet with nulls not allowed
+        EquatableValueSet.Builder builder = EquatableValueSet.newBuilder(
+                allocator, Types.MinorType.VARCHAR.getType(), false, false);
+        builder.add("books");
+        ValueSet equatableSet = builder.build();
+
+        Document result = QueryUtils.makePredicate(field, equatableSet);
+        assertNotNull(result);
+
+        Document expected = new Document("category", new Document("$eq", "books"));
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void testMakePredicate_withEquatableValueSetNumeric()
+    {
+        Field field = new Field("price", FieldType.nullable(new ArrowType.Int(32, true)), null);
+
+        // Create a single value EquatableValueSet with nulls not allowed
+        EquatableValueSet.Builder builder = EquatableValueSet.newBuilder(
+                allocator, Types.MinorType.INT.getType(), false, false);
+        builder.add(100);
+        ValueSet equatableSet = builder.build();
+
+        Document result = QueryUtils.makePredicate(field, equatableSet);
+        assertNotNull(result);
+
+        Document expected = new Document("price", new Document("$eq", 100));
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void testMakePredicate_withMultipleObjectIds()
+    {
+        Field field = new Field("_id", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a SortedRangeSet with multiple single values to trigger the IN operator case
+        ValueSet rangeSet = SortedRangeSet.copyOf(
+                Types.MinorType.VARCHAR.getType(),
+                ImmutableList.of(
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "4ecbe7f9e8c1c9092c000027"),
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "4ecbe7f9e8c1c9092c000028")),
+                false
+        );
+
+        Document result = QueryUtils.makePredicate(field, rangeSet);
+        assertNotNull(result);
+
+        // The implementation should convert strings to ObjectIds and use $in operator
+        Document expected = new Document("_id", 
+            new Document("$in", Arrays.asList(
+                new ObjectId("4ecbe7f9e8c1c9092c000027"),
+                new ObjectId("4ecbe7f9e8c1c9092c000028")
+            ))
+        );
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void testMakePredicate_withMultipleValues()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a SortedRangeSet with multiple single values to trigger the IN operator case
+        ValueSet rangeSet = SortedRangeSet.copyOf(
+                Types.MinorType.VARCHAR.getType(),
+                ImmutableList.of(
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "books"),
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "electronics"),
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "clothing")),
+                false
+        );
+
+        Document result = QueryUtils.makePredicate(field, rangeSet);
+        assertNotNull(result);
+
+        // For non-_id fields, the implementation should use $in with the original values
+        Document expected = new Document("category", 
+            new Document("$in", Arrays.asList("books", "electronics", "clothing"))
+        );
+        
+        // Compare the documents directly instead of their JSON strings
+        Document categoryDoc = (Document) result.get("category");
+        Document expectedCategoryDoc = (Document) expected.get("category");
+        
+        assertEquals("$in", expectedCategoryDoc.keySet().iterator().next());
+        assertEquals("$in", categoryDoc.keySet().iterator().next());
+        
+        // Compare arrays ignoring order
+        assertEquals(
+            new java.util.HashSet<>((java.util.List<?>) expectedCategoryDoc.get("$in")),
+            new java.util.HashSet<>((java.util.List<?>) categoryDoc.get("$in"))
+        );
+    }
+
+    @Test
+    public void testMakePredicate_withNoneConstraint()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a ValueSet that represents no values (isNone)
+        ValueSet noneSet = SortedRangeSet.none(Types.MinorType.VARCHAR.getType());
+
+        Document result = QueryUtils.makePredicate(field, noneSet);
+        assertNotNull(result);
+
+        // Should generate a predicate that matches null values
+        // Using both $exists and $eq for more precise null handling in MongoDB
+        Document expected = new Document("category", 
+            new Document("$exists", true)
+            .append("$eq", null));
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void testMakePredicate_withAllConstraint()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a ValueSet that represents all values (isAll)
+        ValueSet allSet = SortedRangeSet.notNull(allocator, Types.MinorType.VARCHAR.getType());
+
+        Document result = QueryUtils.makePredicate(field, allSet);
+        assertNotNull(result);
+
+        // Should generate a predicate that matches non-null values
+        Document expected = new Document("category", new Document("$ne", null));
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void testMakePredicate_withNullAllowed()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a ValueSet that allows null values
+        ValueSet nullAllowedSet = SortedRangeSet.copyOf(
+                Types.MinorType.VARCHAR.getType(),
+                ImmutableList.of(Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "books")),
+                true
+        );
+
+        Document result = QueryUtils.makePredicate(field, nullAllowedSet);
+        assertNull(result);
     }
 
     @Test
@@ -103,4 +258,3 @@ public class QueryUtilsTest
         });
     }
 }
-
