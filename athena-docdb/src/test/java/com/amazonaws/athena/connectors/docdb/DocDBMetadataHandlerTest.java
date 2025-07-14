@@ -26,6 +26,9 @@ import com.amazonaws.athena.connector.lambda.data.BlockUtils;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
+import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesResponse;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetSplitsResponse;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutRequest;
@@ -48,7 +51,9 @@ import com.mongodb.client.MongoIterable;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.bson.BsonTimestamp;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -67,16 +72,22 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
 import static com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest.UNLIMITED_PAGE_SIZE_VALUE;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -86,6 +97,33 @@ public class DocDBMetadataHandlerTest
     extends TestBase
 {
     private static final Logger logger = LoggerFactory.getLogger(DocDBMetadataHandlerTest.class);
+
+    private static final String STRING_COL = "stringCol";
+    private static final String STRING_COL2 = "stringCol2";
+    private static final String INT_COL = "intCol";
+    private static final String INT_COL2 = "intCol2";
+    private static final String DOUBLE_COL = "doubleCol";
+    private static final String DOUBLE_COL2 = "doubleCol2";
+    private static final String LONG_COL = "longCol";
+    private static final String LONG_COL2 = "longCol2";
+    private static final String BOOLEAN_COL = "booleanCol";
+    private static final String BOOLEAN_COL2 = "booleanCol2";
+    private static final String FLOAT_COL = "floatCol";
+    private static final String FLOAT_COL2 = "floatCol2";
+    private static final String DATE_COL = "dateCol";
+    private static final String DATE_COL2 = "dateCol2";
+    private static final String TIMESTAMP_COL = "timestampCol";
+    private static final String TIMESTAMP_COL2 = "timestampCol2";
+    private static final String OBJECT_ID_COL = "objectIdCol";
+    private static final String OBJECT_ID_COL2 = "objectIdCol2";
+    
+    private static final String STRING_VALUE = "stringVal";
+    private static final double DOUBLE_VALUE = 2.2D;
+    private static final int INT_VALUE = 1;
+    private static final long LONG_VALUE = 100L;
+    private static final float FLOAT_VALUE1 = 1.5F;
+    private static final float FLOAT_VALUE2 = 2.5F;
+    private static final float FLOAT_VALUE3 = 3.5F;
 
     private DocDBMetadataHandler handler;
     private BlockAllocator allocator;
@@ -116,7 +154,7 @@ public class DocDBMetadataHandlerTest
 
         when(connectionFactory.getOrCreateConn(nullable(String.class))).thenReturn(mockClient);
 
-        handler = new DocDBMetadataHandler(awsGlue, connectionFactory, new LocalKeyFactory(), secretsManager, mockAthena, "spillBucket", "spillPrefix", com.google.common.collect.ImmutableMap.of());
+        handler = new DocDBMetadataHandler(awsGlue, connectionFactory, new LocalKeyFactory(), secretsManager, mockAthena, SPILL_BUCKET, SPILL_PREFIX, com.google.common.collect.ImmutableMap.of());
         allocator = new BlockAllocatorImpl();
     }
 
@@ -177,9 +215,69 @@ public class DocDBMetadataHandlerTest
         assertEquals(tableNames.size(), res.getTables().size());
     }
 
-    /**
-     * TODO: Add more types.
-     */
+    @Test
+    public void testDoListTables_withPagination()
+    {
+        try {
+            Document tableNamesDocument = new Document("cursor",
+                    new Document("firstBatch",
+                            Arrays.asList(new Document("name", "table1"),
+                                    new Document("name", "table2"),
+                                    new Document("name", "table3"),
+                                    new Document("name", "table4"),
+                                    new Document("name", "table5"))));
+
+            MongoDatabase mockDatabase = mock(MongoDatabase.class);
+            when(mockClient.getDatabase(eq(DEFAULT_SCHEMA))).thenReturn(mockDatabase);
+            when(mockDatabase.runCommand(any())).thenReturn(tableNamesDocument);
+
+            // First request - page size 2, no token
+            ListTablesRequest firstRequest = new ListTablesRequest(IDENTITY, QUERY_ID, DEFAULT_CATALOG, DEFAULT_SCHEMA,
+                    null, 2);
+            ListTablesResponse firstResponse = handler.doListTables(allocator, firstRequest);
+
+            // Verify first page
+            assertEquals("Should return 2 tables for first page", 2, firstResponse.getTables().size());
+            List<TableName> firstPageTables = new ArrayList<>(firstResponse.getTables());
+            assertEquals(new TableName(DEFAULT_SCHEMA, "table1"), firstPageTables.get(0));
+            assertEquals(new TableName(DEFAULT_SCHEMA, "table2"), firstPageTables.get(1));
+            assertEquals("2", firstResponse.getNextToken());
+
+            // Second request - page size 2, token "2"
+            ListTablesRequest secondRequest = new ListTablesRequest(IDENTITY, QUERY_ID, DEFAULT_CATALOG, DEFAULT_SCHEMA,
+                    firstResponse.getNextToken(), 2);
+            ListTablesResponse secondResponse = handler.doListTables(allocator, secondRequest);
+
+            // Verify second page
+            assertEquals("Should return 2 tables for second page", 2, secondResponse.getTables().size());
+            List<TableName> secondPageTables = new ArrayList<>(secondResponse.getTables());
+            assertEquals(new TableName(DEFAULT_SCHEMA, "table3"), secondPageTables.get(0));
+            assertEquals(new TableName(DEFAULT_SCHEMA, "table4"), secondPageTables.get(1));
+            assertEquals("4", secondResponse.getNextToken());
+
+            // Final request - page size 2, token "4"
+            ListTablesRequest finalRequest = new ListTablesRequest(IDENTITY, QUERY_ID, DEFAULT_CATALOG, DEFAULT_SCHEMA,
+                    secondResponse.getNextToken(), 2);
+            ListTablesResponse finalResponse = handler.doListTables(allocator, finalRequest);
+
+            // Verify final page
+            assertEquals("Should return 1 table for final page", 1, finalResponse.getTables().size());
+            List<TableName> finalPageTables = new ArrayList<>(finalResponse.getTables());
+            assertEquals(new TableName(DEFAULT_SCHEMA, "table5"), finalPageTables.get(0));
+            assertEquals("6", finalResponse.getNextToken());  // Token is still generated even for last page
+
+            // Verify empty page after all data is consumed
+            ListTablesRequest emptyRequest = new ListTablesRequest(IDENTITY, QUERY_ID, DEFAULT_CATALOG, DEFAULT_SCHEMA,
+                    finalResponse.getNextToken(), 2);
+            ListTablesResponse emptyResponse = handler.doListTables(allocator, emptyRequest);
+            assertEquals("Should return 0 tables when all data is consumed", 0, emptyResponse.getTables().size());
+            assertEquals("8", emptyResponse.getNextToken());  // Token continues to increment
+        }
+        catch (Exception e) {
+            fail("Unexpected exception:" + e.getMessage());
+        }
+    }
+
     @Test
     public void doGetTable()
             throws Exception
@@ -188,25 +286,40 @@ public class DocDBMetadataHandlerTest
 
         Document doc1 = new Document();
         documents.add(doc1);
-        doc1.put("stringCol", "stringVal");
-        doc1.put("intCol", 1);
-        doc1.put("doubleCol", 2.2D);
-        doc1.put("longCol", 100L);
+        doc1.put(STRING_COL, STRING_VALUE);
+        doc1.put(INT_COL, INT_VALUE);
+        doc1.put(DOUBLE_COL, DOUBLE_VALUE);
+        doc1.put(LONG_COL, LONG_VALUE);
+        doc1.put(BOOLEAN_COL, true);
+        doc1.put(FLOAT_COL, FLOAT_VALUE1);
+        doc1.put(DATE_COL, new Date());
+        doc1.put(TIMESTAMP_COL, new BsonTimestamp(System.currentTimeMillis()));
+        doc1.put(OBJECT_ID_COL, ObjectId.get());
         doc1.put("unsupported", new UnsupportedType());
 
         Document doc2 = new Document();
         documents.add(doc2);
-        doc2.put("stringCol2", "stringVal");
-        doc2.put("intCol2", 1);
-        doc2.put("doubleCol2", 2.2D);
-        doc2.put("longCol2", 100L);
+        doc2.put(STRING_COL2, STRING_VALUE);
+        doc2.put(INT_COL2, INT_VALUE);
+        doc2.put(DOUBLE_COL2, DOUBLE_VALUE);
+        doc2.put(LONG_COL2, LONG_VALUE);
+        doc2.put(BOOLEAN_COL2, false);
+        doc2.put(FLOAT_COL2, FLOAT_VALUE2);
+        doc2.put(DATE_COL2, new Date());
+        doc2.put(TIMESTAMP_COL2, new BsonTimestamp(System.currentTimeMillis()));
+        doc2.put(OBJECT_ID_COL2, ObjectId.get());
 
         Document doc3 = new Document();
         documents.add(doc3);
-        doc3.put("stringCol", "stringVal");
-        doc3.put("intCol2", 1);
-        doc3.put("doubleCol", 2.2D);
-        doc3.put("longCol2", 100L);
+        doc3.put(STRING_COL, STRING_VALUE);
+        doc3.put(INT_COL2, INT_VALUE);
+        doc3.put(DOUBLE_COL, DOUBLE_VALUE);
+        doc3.put(LONG_COL2, LONG_VALUE);
+        doc3.put(BOOLEAN_COL, false);
+        doc3.put(FLOAT_COL, FLOAT_VALUE3);
+        doc3.put(DATE_COL, new Date());
+        doc3.put(TIMESTAMP_COL, new BsonTimestamp(System.currentTimeMillis()));
+        doc3.put(OBJECT_ID_COL, ObjectId.get());
 
         MongoDatabase mockDatabase = mock(MongoDatabase.class);
         MongoCollection mockCollection = mock(MongoCollection.class);
@@ -223,31 +336,61 @@ public class DocDBMetadataHandlerTest
         GetTableResponse res = handler.doGetTable(allocator, req);
         logger.info("doGetTable - {}", res);
 
-        assertEquals(9, res.getSchema().getFields().size());
+        assertEquals(19, res.getSchema().getFields().size());
 
-        Field stringCol = res.getSchema().findField("stringCol");
+        Field stringCol = res.getSchema().findField(STRING_COL);
         assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(stringCol.getType()));
 
-        Field stringCol2 = res.getSchema().findField("stringCol2");
+        Field stringCol2 = res.getSchema().findField(STRING_COL2);
         assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(stringCol2.getType()));
 
-        Field intCol = res.getSchema().findField("intCol");
+        Field intCol = res.getSchema().findField(INT_COL);
         assertEquals(Types.MinorType.INT, Types.getMinorTypeForArrowType(intCol.getType()));
 
-        Field intCol2 = res.getSchema().findField("intCol2");
+        Field intCol2 = res.getSchema().findField(INT_COL2);
         assertEquals(Types.MinorType.INT, Types.getMinorTypeForArrowType(intCol2.getType()));
 
-        Field doubleCol = res.getSchema().findField("doubleCol");
+        Field doubleCol = res.getSchema().findField(DOUBLE_COL);
         assertEquals(Types.MinorType.FLOAT8, Types.getMinorTypeForArrowType(doubleCol.getType()));
 
-        Field doubleCol2 = res.getSchema().findField("doubleCol2");
+        Field doubleCol2 = res.getSchema().findField(DOUBLE_COL2);
         assertEquals(Types.MinorType.FLOAT8, Types.getMinorTypeForArrowType(doubleCol2.getType()));
 
-        Field longCol = res.getSchema().findField("longCol");
+        Field longCol = res.getSchema().findField(LONG_COL);
         assertEquals(Types.MinorType.BIGINT, Types.getMinorTypeForArrowType(longCol.getType()));
 
-        Field longCol2 = res.getSchema().findField("longCol2");
+        Field longCol2 = res.getSchema().findField(LONG_COL2);
         assertEquals(Types.MinorType.BIGINT, Types.getMinorTypeForArrowType(longCol2.getType()));
+
+        Field booleanCol = res.getSchema().findField(BOOLEAN_COL);
+        assertEquals(Types.MinorType.BIT, Types.getMinorTypeForArrowType(booleanCol.getType()));
+
+        Field booleanCol2 = res.getSchema().findField(BOOLEAN_COL2);
+        assertEquals(Types.MinorType.BIT, Types.getMinorTypeForArrowType(booleanCol2.getType()));
+
+        Field floatCol = res.getSchema().findField(FLOAT_COL);
+        assertEquals(Types.MinorType.FLOAT4, Types.getMinorTypeForArrowType(floatCol.getType()));
+
+        Field floatCol2 = res.getSchema().findField(FLOAT_COL2);
+        assertEquals(Types.MinorType.FLOAT4, Types.getMinorTypeForArrowType(floatCol2.getType()));
+
+        Field dateCol = res.getSchema().findField(DATE_COL);
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(dateCol.getType()));
+
+        Field dateCol2 = res.getSchema().findField(DATE_COL2);
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(dateCol2.getType()));
+
+        Field timestampCol = res.getSchema().findField(TIMESTAMP_COL);
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(timestampCol.getType()));
+
+        Field timestampCol2 = res.getSchema().findField(TIMESTAMP_COL2);
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(timestampCol2.getType()));
+
+        Field objectIdCol = res.getSchema().findField(OBJECT_ID_COL);
+        assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(objectIdCol.getType()));
+
+        Field objectIdCol2 = res.getSchema().findField(OBJECT_ID_COL2);
+        assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(objectIdCol2.getType()));
 
         Field unsupported = res.getSchema().findField("unsupported");
         assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(unsupported.getType()));
@@ -257,33 +400,47 @@ public class DocDBMetadataHandlerTest
     public void doGetTableCaseInsensitiveMatch()
             throws Exception
     {
-
         DocDBMetadataHandler caseInsensitiveHandler = new DocDBMetadataHandler(awsGlue,
                 connectionFactory, new LocalKeyFactory(), secretsManager, mockAthena,
-                "spillBucket", "spillPrefix", com.google.common.collect.ImmutableMap.of("enable_case_insensitive_match", "true"));
+                SPILL_BUCKET, SPILL_PREFIX, com.google.common.collect.ImmutableMap.of("enable_case_insensitive_match", "true"));
         List<Document> documents = new ArrayList<>();
 
         Document doc1 = new Document();
         documents.add(doc1);
-        doc1.put("stringCol", "stringVal");
-        doc1.put("intCol", 1);
-        doc1.put("doubleCol", 2.2D);
-        doc1.put("longCol", 100L);
+        doc1.put(STRING_COL, STRING_VALUE);
+        doc1.put(INT_COL, INT_VALUE);
+        doc1.put(DOUBLE_COL, DOUBLE_VALUE);
+        doc1.put(LONG_COL, LONG_VALUE);
+        doc1.put(BOOLEAN_COL, true);
+        doc1.put(FLOAT_COL, FLOAT_VALUE1);
+        doc1.put(DATE_COL, new Date());
+        doc1.put(TIMESTAMP_COL, new BsonTimestamp(System.currentTimeMillis()));
+        doc1.put(OBJECT_ID_COL, ObjectId.get());
         doc1.put("unsupported", new UnsupportedType());
 
         Document doc2 = new Document();
         documents.add(doc2);
-        doc2.put("stringCol2", "stringVal");
-        doc2.put("intCol2", 1);
-        doc2.put("doubleCol2", 2.2D);
-        doc2.put("longCol2", 100L);
+        doc2.put(STRING_COL2, STRING_VALUE);
+        doc2.put(INT_COL2, INT_VALUE);
+        doc2.put(DOUBLE_COL2, DOUBLE_VALUE);
+        doc2.put(LONG_COL2, LONG_VALUE);
+        doc2.put(BOOLEAN_COL2, false);
+        doc2.put(FLOAT_COL2, FLOAT_VALUE2);
+        doc2.put(DATE_COL2, new Date());
+        doc2.put(TIMESTAMP_COL2, new BsonTimestamp(System.currentTimeMillis()));
+        doc2.put(OBJECT_ID_COL2, ObjectId.get());
 
         Document doc3 = new Document();
         documents.add(doc3);
-        doc3.put("stringCol", "stringVal");
-        doc3.put("intCol2", 1);
-        doc3.put("doubleCol", 2.2D);
-        doc3.put("longCol2", 100L);
+        doc3.put(STRING_COL, STRING_VALUE);
+        doc3.put(INT_COL2, INT_VALUE);
+        doc3.put(DOUBLE_COL, DOUBLE_VALUE);
+        doc3.put(LONG_COL2, LONG_VALUE);
+        doc3.put(BOOLEAN_COL, false);
+        doc3.put(FLOAT_COL, FLOAT_VALUE3);
+        doc3.put(DATE_COL, new Date());
+        doc3.put(TIMESTAMP_COL, new BsonTimestamp(System.currentTimeMillis()));
+        doc3.put(OBJECT_ID_COL, ObjectId.get());
 
         MongoDatabase mockDatabase = mock(MongoDatabase.class);
         MongoCollection mockCollection = mock(MongoCollection.class);
@@ -302,7 +459,6 @@ public class DocDBMetadataHandlerTest
         when(mockDatabase.getCollection(eq(TEST_TABLE))).thenReturn(mockCollection);
         when(mockCollection.find()).thenReturn(mockIterable);
         when(mockIterable.limit(anyInt())).thenReturn(mockIterable);
-        Mockito.lenient().when(mockIterable.maxScan(anyInt())).thenReturn(mockIterable);
         when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
         when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
 
@@ -314,45 +470,73 @@ public class DocDBMetadataHandlerTest
         assertEquals(TEST_TABLE, res.getTableName().getTableName());
         logger.info("doGetTable - {}", res);
 
-        assertEquals(9, res.getSchema().getFields().size());
+        assertEquals(19, res.getSchema().getFields().size());
 
-        Field stringCol = res.getSchema().findField("stringCol");
+        Field stringCol = res.getSchema().findField(STRING_COL);
         assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(stringCol.getType()));
 
-        Field stringCol2 = res.getSchema().findField("stringCol2");
+        Field stringCol2 = res.getSchema().findField(STRING_COL2);
         assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(stringCol2.getType()));
 
         Field intCol = res.getSchema().findField("intCol");
         assertEquals(Types.MinorType.INT, Types.getMinorTypeForArrowType(intCol.getType()));
 
-        Field intCol2 = res.getSchema().findField("intCol2");
+        Field intCol2 = res.getSchema().findField(INT_COL2);
         assertEquals(Types.MinorType.INT, Types.getMinorTypeForArrowType(intCol2.getType()));
 
-        Field doubleCol = res.getSchema().findField("doubleCol");
+        Field doubleCol = res.getSchema().findField(DOUBLE_COL);
         assertEquals(Types.MinorType.FLOAT8, Types.getMinorTypeForArrowType(doubleCol.getType()));
 
-        Field doubleCol2 = res.getSchema().findField("doubleCol2");
+        Field doubleCol2 = res.getSchema().findField(DOUBLE_COL2);
         assertEquals(Types.MinorType.FLOAT8, Types.getMinorTypeForArrowType(doubleCol2.getType()));
 
         Field longCol = res.getSchema().findField("longCol");
         assertEquals(Types.MinorType.BIGINT, Types.getMinorTypeForArrowType(longCol.getType()));
 
-        Field longCol2 = res.getSchema().findField("longCol2");
+        Field longCol2 = res.getSchema().findField(LONG_COL2);
         assertEquals(Types.MinorType.BIGINT, Types.getMinorTypeForArrowType(longCol2.getType()));
+
+        Field booleanCol = res.getSchema().findField(BOOLEAN_COL);
+        assertEquals(Types.MinorType.BIT, Types.getMinorTypeForArrowType(booleanCol.getType()));
+
+        Field booleanCol2 = res.getSchema().findField(BOOLEAN_COL2);
+        assertEquals(Types.MinorType.BIT, Types.getMinorTypeForArrowType(booleanCol2.getType()));
+
+        Field floatCol = res.getSchema().findField(FLOAT_COL);
+        assertEquals(Types.MinorType.FLOAT4, Types.getMinorTypeForArrowType(floatCol.getType()));
+
+        Field floatCol2 = res.getSchema().findField(FLOAT_COL2);
+        assertEquals(Types.MinorType.FLOAT4, Types.getMinorTypeForArrowType(floatCol2.getType()));
+
+        Field dateCol = res.getSchema().findField(DATE_COL);
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(dateCol.getType()));
+
+        Field dateCol2 = res.getSchema().findField(DATE_COL2);
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(dateCol2.getType()));
+
+        Field timestampCol = res.getSchema().findField(TIMESTAMP_COL);
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(timestampCol.getType()));
+
+        Field timestampCol2 = res.getSchema().findField(TIMESTAMP_COL2);
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(timestampCol2.getType()));
+
+        Field objectIdCol = res.getSchema().findField(OBJECT_ID_COL);
+        assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(objectIdCol.getType()));
+
+        Field objectIdCol2 = res.getSchema().findField(OBJECT_ID_COL2);
+        assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(objectIdCol2.getType()));
 
         Field unsupported = res.getSchema().findField("unsupported");
         assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(unsupported.getType()));
     }
 
-
     @Test
     public void doGetTableCaseInsensitiveMatchMultipleMatch()
             throws Exception
     {
-
         DocDBMetadataHandler caseInsensitiveHandler = new DocDBMetadataHandler(awsGlue,
                 connectionFactory, new LocalKeyFactory(), secretsManager, mockAthena,
-                "spillBucket", "spillPrefix", com.google.common.collect.ImmutableMap.of("enable_case_insensitive_match", "true"));
+                SPILL_BUCKET, SPILL_PREFIX, com.google.common.collect.ImmutableMap.of("enable_case_insensitive_match", "true"));
 
         MongoIterable mockListDatabaseNamesIterable = mock(MongoIterable.class);
         when(mockClient.listDatabaseNames()).thenReturn(mockListDatabaseNamesIterable);
@@ -363,7 +547,8 @@ public class DocDBMetadataHandlerTest
         try {
             GetTableResponse res = caseInsensitiveHandler.doGetTable(allocator, req);
             fail("doGetTableCaseInsensitiveMatchMultipleMatch should failed");
-        } catch(IllegalArgumentException ex){
+        }
+        catch (IllegalArgumentException ex) {
             assertEquals("Schema name is empty or more than 1 for case insensitive match. schemaName: deFAULT, size: 2", ex.getMessage());
         }
     }
@@ -372,32 +557,46 @@ public class DocDBMetadataHandlerTest
     public void doGetTableCaseInsensitiveMatchNotEnable()
             throws Exception
     {
-
         String mixedCaseSchemaName = "deFAULT";
         String mixedCaseTableName = "tesT_Table";
         List<Document> documents = new ArrayList<>();
 
         Document doc1 = new Document();
         documents.add(doc1);
-        doc1.put("stringCol", "stringVal");
-        doc1.put("intCol", 1);
-        doc1.put("doubleCol", 2.2D);
-        doc1.put("longCol", 100L);
+        doc1.put(STRING_COL, STRING_VALUE);
+        doc1.put(INT_COL, INT_VALUE);
+        doc1.put(DOUBLE_COL, DOUBLE_VALUE);
+        doc1.put(LONG_COL, LONG_VALUE);
+        doc1.put(BOOLEAN_COL, true);
+        doc1.put(FLOAT_COL, FLOAT_VALUE1);
+        doc1.put(DATE_COL, new Date());
+        doc1.put(TIMESTAMP_COL, new BsonTimestamp(System.currentTimeMillis()));
+        doc1.put(OBJECT_ID_COL, ObjectId.get());
         doc1.put("unsupported", new UnsupportedType());
 
         Document doc2 = new Document();
         documents.add(doc2);
-        doc2.put("stringCol2", "stringVal");
-        doc2.put("intCol2", 1);
-        doc2.put("doubleCol2", 2.2D);
-        doc2.put("longCol2", 100L);
+        doc2.put(STRING_COL2, STRING_VALUE);
+        doc2.put(INT_COL2, INT_VALUE);
+        doc2.put(DOUBLE_COL2, DOUBLE_VALUE);
+        doc2.put(LONG_COL2, LONG_VALUE);
+        doc2.put(BOOLEAN_COL2, false);
+        doc2.put(FLOAT_COL2, FLOAT_VALUE2);
+        doc2.put(DATE_COL2, new Date());
+        doc2.put(TIMESTAMP_COL2, new BsonTimestamp(System.currentTimeMillis()));
+        doc2.put(OBJECT_ID_COL2, ObjectId.get());
 
         Document doc3 = new Document();
         documents.add(doc3);
-        doc3.put("stringCol", "stringVal");
-        doc3.put("intCol2", 1);
-        doc3.put("doubleCol", 2.2D);
-        doc3.put("longCol2", 100L);
+        doc3.put(STRING_COL, STRING_VALUE);
+        doc3.put(INT_COL2, INT_VALUE);
+        doc3.put(DOUBLE_COL, DOUBLE_VALUE);
+        doc3.put(LONG_COL2, LONG_VALUE);
+        doc3.put(BOOLEAN_COL, false);
+        doc3.put(FLOAT_COL, FLOAT_VALUE3);
+        doc3.put(DATE_COL, new Date());
+        doc3.put(TIMESTAMP_COL, new BsonTimestamp(System.currentTimeMillis()));
+        doc3.put(OBJECT_ID_COL, ObjectId.get());
 
         MongoDatabase mockDatabase = mock(MongoDatabase.class);
         MongoCollection mockCollection = mock(MongoCollection.class);
@@ -406,7 +605,6 @@ public class DocDBMetadataHandlerTest
         when(mockDatabase.getCollection(eq(mixedCaseTableName))).thenReturn(mockCollection);
         when(mockCollection.find()).thenReturn(mockIterable);
         when(mockIterable.limit(anyInt())).thenReturn(mockIterable);
-        Mockito.lenient().when(mockIterable.maxScan(anyInt())).thenReturn(mockIterable);
         when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
         when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
 
@@ -416,10 +614,28 @@ public class DocDBMetadataHandlerTest
 
         assertEquals(mixedCaseSchemaName, res.getTableName().getSchemaName());
         assertEquals(mixedCaseTableName, res.getTableName().getTableName());
+        assertEquals(19, res.getSchema().getFields().size());
+
+        Map<String, Field> fields = new HashMap<>();
+        res.getSchema().getFields().forEach(next -> fields.put(next.getName(), next));
+
+        assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(fields.get("stringCol").getType()));
+        assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(fields.get("stringCol2").getType()));
+        assertEquals(Types.MinorType.INT, Types.getMinorTypeForArrowType(fields.get("intCol").getType()));
+        assertEquals(Types.MinorType.INT, Types.getMinorTypeForArrowType(fields.get("intCol2").getType()));
+        assertEquals(Types.MinorType.FLOAT8, Types.getMinorTypeForArrowType(fields.get("doubleCol").getType()));
+        assertEquals(Types.MinorType.FLOAT8, Types.getMinorTypeForArrowType(fields.get("doubleCol2").getType()));
+        assertEquals(Types.MinorType.BIGINT, Types.getMinorTypeForArrowType(fields.get("longCol").getType()));
+        assertEquals(Types.MinorType.BIGINT, Types.getMinorTypeForArrowType(fields.get("longCol2").getType()));
+        assertEquals(Types.MinorType.BIT, Types.getMinorTypeForArrowType(fields.get("booleanCol").getType()));
+        assertEquals(Types.MinorType.FLOAT4, Types.getMinorTypeForArrowType(fields.get("floatCol").getType()));
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(fields.get("dateCol").getType()));
+        assertEquals(Types.MinorType.DATEMILLI, Types.getMinorTypeForArrowType(fields.get("timestampCol").getType()));
+        assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(fields.get("objectIdCol").getType()));
+        assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(fields.get("unsupported").getType()));
 
         verify(mockClient, Mockito.never()).listDatabaseNames();
         verify(mockDatabase, Mockito.never()).listCollectionNames();
-
     }
 
     @Test
@@ -478,5 +694,105 @@ public class DocDBMetadataHandlerTest
 
         assertTrue("Continuation criteria violated", response.getSplits().size() == 1);
         assertTrue("Continuation criteria violated", response.getContinuationToken() == null);
+    }
+
+    @Test
+    public void testDoGetDataSourceCapabilities_whenQueryPassthroughEnabled()
+    {
+        Map<String, String> configOptions = new HashMap<>();
+        configOptions.put("enable_query_passthrough", "true");
+
+        DocDBMetadataHandler handlerWithQPT = new DocDBMetadataHandler(awsGlue,
+                connectionFactory, new LocalKeyFactory(), secretsManager, mockAthena,
+                SPILL_BUCKET, SPILL_PREFIX, configOptions);
+
+        GetDataSourceCapabilitiesRequest request = new GetDataSourceCapabilitiesRequest(IDENTITY, QUERY_ID, DEFAULT_CATALOG);
+        GetDataSourceCapabilitiesResponse response = handlerWithQPT.doGetDataSourceCapabilities(allocator, request);
+
+        assertNotNull("Response should not be null", response);
+        assertEquals(DEFAULT_CATALOG, response.getCatalogName());
+        assertFalse("Capabilities should not be empty when query passthrough is enabled", response.getCapabilities().isEmpty());
+    }
+
+    @Test
+    public void testDoGetQueryPassthroughSchema()
+    {
+        try {
+            List<Document> documents = new ArrayList<>();
+            Document doc1 = new Document();
+            documents.add(doc1);
+            doc1.put("title", "Bill of Rights");
+            doc1.put("year", 1791);
+            doc1.put("type", "document");
+
+            MongoDatabase mockDatabase = mock(MongoDatabase.class);
+            MongoCollection mockCollection = mock(MongoCollection.class);
+            FindIterable mockIterable = mock(FindIterable.class);
+            when(mockClient.getDatabase(eq("example"))).thenReturn(mockDatabase);
+            when(mockDatabase.getCollection(eq("tpcds"))).thenReturn(mockCollection);
+            when(mockCollection.find()).thenReturn(mockIterable);
+            when(mockIterable.limit(anyInt())).thenReturn(mockIterable);
+            when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
+            when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+
+            Map<String, String> queryPassthroughParameters = new HashMap<>();
+            queryPassthroughParameters.put("schemaFunctionName", "system.query");
+            queryPassthroughParameters.put("DATABASE", "example");
+            queryPassthroughParameters.put("COLLECTION", "tpcds");
+            queryPassthroughParameters.put("FILTER", "{\"title\": \"Bill of Rights\"}");
+            queryPassthroughParameters.put("enable_query_passthrough", "true");
+
+            GetTableRequest request = new GetTableRequest(
+                    IDENTITY,
+                    QUERY_ID,
+                    DEFAULT_CATALOG,
+                    new TableName("example", "tpcds"),
+                    queryPassthroughParameters
+            );
+            GetTableResponse response = handler.doGetQueryPassthroughSchema(allocator, request);
+
+            // Verify response
+            assertNotNull("Response should not be null", response);
+            assertEquals(DEFAULT_CATALOG, response.getCatalogName());
+            // Verify that the schema and table names from query passthrough are used
+            assertEquals(new TableName("example", "tpcds"), response.getTableName());
+
+            Schema schema = response.getSchema();
+            assertNotNull("Schema should not be null", schema);
+
+            // Verify schema fields match the document structure
+            Field titleField = schema.findField("title");
+            assertNotNull("title field should exist", titleField);
+            assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(titleField.getType()));
+
+            Field yearField = schema.findField("year");
+            assertNotNull("year field should exist", yearField);
+            assertEquals(Types.MinorType.INT, Types.getMinorTypeForArrowType(yearField.getType()));
+
+            Field typeField = schema.findField("type");
+            assertNotNull("type field should exist", typeField);
+            assertEquals(Types.MinorType.VARCHAR, Types.getMinorTypeForArrowType(typeField.getType()));
+        }
+        catch (Exception e) {
+            fail("Unexpected exception:" + e.getMessage());
+        }
+    }
+
+    @Test(expected = AthenaConnectorException.class)
+    public void testDoGetQueryPassthroughSchema_InvalidParameters() throws Exception
+    {
+        // Test with missing required parameters
+        Map<String, String> invalidParams = new HashMap<>();
+        invalidParams.put("schemaFunctionName", "system.query");
+        invalidParams.put("enable_query_passthrough", "true");
+        // Missing DATABASE and COLLECTION parameters
+        GetTableRequest invalidRequest = new GetTableRequest(
+                IDENTITY,
+                QUERY_ID,
+                DEFAULT_CATALOG,
+                TABLE_NAME,
+                invalidParams
+        );
+        handler.doGetQueryPassthroughSchema(allocator, invalidRequest);
     }
 }
