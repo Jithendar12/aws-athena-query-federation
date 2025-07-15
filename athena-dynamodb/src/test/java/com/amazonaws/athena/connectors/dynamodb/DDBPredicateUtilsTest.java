@@ -20,6 +20,7 @@
 package com.amazonaws.athena.connectors.dynamodb;
 
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
+import com.amazonaws.athena.connector.lambda.domain.predicate.EquatableValueSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.ValueSet;
@@ -34,17 +35,26 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.substrait.proto.Plan;
 import org.apache.arrow.vector.types.pojo.ArrowType;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.arrow.vector.types.Types.MinorType.VARCHAR;
 import static org.junit.Assert.assertEquals;
@@ -53,13 +63,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
 /**
  * Tests DynamoDB utility methods relating to predicate handling.
  */
@@ -67,6 +70,10 @@ import java.util.Set;
 public class DDBPredicateUtilsTest
 {
     private static final Logger logger = LoggerFactory.getLogger(DDBPredicateUtilsTest.class);
+
+    private static final String VALUE_1 = "value1";
+    private static final String VALUE_2 = "value2";
+    private static final String VALUE_3 = "value3";
 
     @Test
     public void testAliasColumn()
@@ -842,5 +849,58 @@ public class DDBPredicateUtilsTest
         );
         assertEquals("#column_with_special_chars = :v0", result);
         assertEquals(1, accumulator.size());
+    }
+
+    @Test
+    public void generateSingleColumnFilter_withMultipleValues_returnsInClauseForWhitelistAndNotInClauseForBlacklist()
+    {
+        final String expectedInClause = "#test_column IN (:v0,:v1,:v2)";
+        final String expectedNotInClause = "NOT " + expectedInClause;
+
+        // Test whitelist (IN) case
+        List<AttributeValue> accumulator = new ArrayList<>();
+        IncrementingValueNameProducer valueNameProducer = new IncrementingValueNameProducer();
+        
+        // Create a schema with a VARCHAR field
+        List<Field> fields = new ArrayList<>();
+        fields.add(new Field("test_column", FieldType.nullable(VARCHAR.getType()), null));
+        Schema schema = new Schema(fields);
+        DDBRecordMetadata recordMetadata = new DDBRecordMetadata(schema);
+        
+        ValueSet valueSet = EquatableValueSet.newBuilder(new BlockAllocatorImpl(), VARCHAR.getType(), true, false)
+                .add(VALUE_1).add(VALUE_2).add(VALUE_3).build();
+
+        String filterExpression = DDBPredicateUtils.generateSingleColumnFilter(
+                "test_column", valueSet, accumulator, valueNameProducer, recordMetadata, false);
+
+        // Verify the filter expression contains IN clause
+        assertEquals(expectedInClause, filterExpression);
+        
+        // Verify the bound values
+        verifyAccumulatorValues(accumulator);
+
+        // Test blacklist (NOT IN) case
+        accumulator = new ArrayList<>();
+        valueNameProducer = new IncrementingValueNameProducer();
+        
+        valueSet = EquatableValueSet.newBuilder(new BlockAllocatorImpl(), VARCHAR.getType(), false, false)
+                .add(VALUE_1).add(VALUE_2).add(VALUE_3).build();
+
+        filterExpression = DDBPredicateUtils.generateSingleColumnFilter(
+                "test_column", valueSet, accumulator, valueNameProducer, recordMetadata, false);
+
+        // Verify the filter expression contains NOT IN clause
+        assertEquals(expectedNotInClause, filterExpression);
+        
+        // Verify the bound values
+        verifyAccumulatorValues(accumulator);
+    }
+
+    private void verifyAccumulatorValues(List<AttributeValue> accumulator)
+    {
+        assertEquals(3, accumulator.size());
+        assertEquals(DDBPredicateUtilsTest.VALUE_1, accumulator.get(0).s());
+        assertEquals(DDBPredicateUtilsTest.VALUE_2, accumulator.get(1).s());
+        assertEquals(DDBPredicateUtilsTest.VALUE_3, accumulator.get(2).s());
     }
 }
