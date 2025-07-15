@@ -39,6 +39,7 @@ import com.amazonaws.athena.connector.lambda.records.ReadRecordsResponse;
 import com.amazonaws.athena.connector.lambda.records.RecordResponse;
 import com.amazonaws.athena.connector.lambda.security.EncryptionKeyFactory;
 import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
+import com.amazonaws.athena.connectors.dynamodb.qpt.DDBQueryPassthrough;
 import com.amazonaws.athena.connectors.dynamodb.util.DDBTypeUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -95,10 +96,9 @@ import static com.amazonaws.athena.connectors.dynamodb.constants.DynamoDBConstan
 import static com.amazonaws.athena.connectors.dynamodb.constants.DynamoDBConstants.SEGMENT_COUNT_METADATA;
 import static com.amazonaws.athena.connectors.dynamodb.constants.DynamoDBConstants.SEGMENT_ID_PROPERTY;
 import static com.amazonaws.athena.connectors.dynamodb.constants.DynamoDBConstants.TABLE_METADATA;
-
-import static com.amazonaws.services.dynamodbv2.document.ItemUtils.toAttributeValue;
 import static com.amazonaws.util.json.Jackson.toJsonString;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -110,6 +110,19 @@ public class DynamoDBRecordHandlerTest
         extends TestBase
 {
     private static final Logger logger = LoggerFactory.getLogger(DynamoDBRecordHandlerTest.class);
+    private static final String SCHEMA_FUNCTION_NAME = "system.query";
+    private static final String SELECT_COL_0_COL_1_QUERY = "SELECT col_0, col_1 FROM " + TEST_TABLE + " WHERE col_0 = 'test_str_0'";
+    private static final String COL_0 = "col_0";
+    private static final String COL_1 = "col_1";
+    private static final String TEST_STR_0 = "test_str_0";
+    private static final long SPILL_SIZE = 100_000_000_000L;
+    private static final int MINIMUM_RECORD_COUNT = 1;
+    private static final String HASH_KEY_COL_0 = "col_0";
+    private static final String RANGE_FILTER_IN = "#col_1 IN (:v1,:v2,:v3)";
+    private static final String RANGE_FILTER_EQUAL = "#col_1 = :v0";
+    private static final int VALUE_1 = 1;
+    private static final int VALUE_2 = 2;
+    private static final int VALUE_3 = 3;
 
     private static final SpillLocation SPILL_LOCATION = S3SpillLocation.newBuilder()
             .withBucket(UUID.randomUUID().toString())
@@ -162,16 +175,11 @@ public class DynamoDBRecordHandlerTest
                 .add(SEGMENT_COUNT_METADATA, "1")
                 .build();
 
-        ReadRecordsRequest request = new ReadRecordsRequest(
-                TEST_IDENTITY,
-                TEST_CATALOG_NAME,
-                TEST_QUERY_ID,
+        ReadRecordsRequest request = createReadRecordsRequest(
                 TEST_TABLE_NAME,
                 schema,
                 split,
-                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(),null),
-                100_000_000_000L, // too big to spill
-                100_000_000_000L);
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null));
 
         RecordResponse rawResponse = handler.doReadRecords(allocator, request);
 
@@ -798,16 +806,11 @@ public class DynamoDBRecordHandlerTest
                 .add(SEGMENT_COUNT_METADATA, "1")
                 .build();
 
-        ReadRecordsRequest request = new ReadRecordsRequest(
-                TEST_IDENTITY,
-                TEST_CATALOG_NAME,
-                TEST_QUERY_ID,
+        ReadRecordsRequest request = createReadRecordsRequest(
                 TEST_TABLE_7_NAME,
                 schema,
                 split,
-                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
-                100_000_000_000L, // too big to spill
-                100_000_000_000L);
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null));
 
         RecordResponse rawResponse = handler.doReadRecords(allocator, request);
         assertTrue(rawResponse instanceof ReadRecordsResponse);
@@ -995,9 +998,190 @@ public class DynamoDBRecordHandlerTest
                 exception.getErrorDetails().errorCode());
     }
 
+    @Test
+    public void doReadRecords_withQueryPassthroughPartiQLQuery_returnsRecordsMatchingQuery()
+            throws Exception
+    {
+        // Prepare the constraints with query passthrough enabled
+        Map<String, String> qptArguments = ImmutableMap.of(
+                "schemaFunctionName", SCHEMA_FUNCTION_NAME,
+                DDBQueryPassthrough.QUERY, SELECT_COL_0_COL_1_QUERY
+        );
+
+        Constraints constraints = new Constraints(
+                Collections.emptyMap(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                DEFAULT_NO_LIMIT,
+                qptArguments,
+                null
+        );
+
+        Split split = Split.newBuilder(SPILL_LOCATION, keyFactory.create())
+                .add(TABLE_METADATA, TEST_TABLE)
+                .build();
+
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                TEST_IDENTITY,
+                TEST_CATALOG_NAME,
+                TEST_QUERY_ID,
+                TEST_TABLE_NAME,
+                schema,
+                split,
+                constraints,
+                SPILL_SIZE, // too big to spill
+                SPILL_SIZE);
+
+        RecordResponse rawResponse = handler.doReadRecords(allocator, request);
+
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+
+        logger.info("doReadRecords_withQueryPassthroughPartiQLQuery_returnsRecordsMatchingQuery: rows[{}]", response.getRecordCount());
+
+        assertTrue("Should have at least one record from query passthrough", response.getRecords().getRowCount() >= MINIMUM_RECORD_COUNT);
+
+        // Verify the data structure is correct - all returned records should have col_0 = 'test_str_0'
+        Block records = response.getRecords();
+        logger.info("doReadRecords_withQueryPassthroughPartiQLQuery_returnsRecordsMatchingQuery: Found {} records", records.getRowCount());
+
+        // Verify the first record to confirm query passthrough is working
+        String col0Value = records.getFieldReader(COL_0).readText().toString();
+        logger.info("doReadRecords_withQueryPassthroughPartiQLQuery_returnsRecordsMatchingQuery: First record: col_0={}, col_1={}",
+                col0Value, records.getFieldReader(COL_1).readBigDecimal());
+        assertEquals(TEST_STR_0, col0Value);
+        // col_1 should be a valid number
+        assertNotNull("col_1 should not be null", records.getFieldReader(COL_1).readBigDecimal());
+    }
+
+    @Test
+    public void doReadRecords_withInFilterWithMultipleValues_returnsReadRecordsResponse()
+            throws Exception
+    {
+        Map<String, AttributeValue> expressionValues = ImmutableMap.of(
+                ":v1", DDBTypeUtils.toAttributeValue(VALUE_1),
+                ":v2", DDBTypeUtils.toAttributeValue(VALUE_2),
+                ":v3", DDBTypeUtils.toAttributeValue(VALUE_3));
+        Split split = createQuerySplitWithRangeFilter(RANGE_FILTER_IN, expressionValues);
+
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                TEST_IDENTITY,
+                TEST_CATALOG_NAME,
+                TEST_QUERY_ID,
+                TEST_TABLE_NAME,
+                schema,
+                split,
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                SPILL_SIZE,
+                SPILL_SIZE);
+
+        RecordResponse rawResponse = handler.doReadRecords(allocator, request);
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+        assertNotNull("Response should not be null", response);
+    }
+
+    @Test
+    public void doReadRecords_withNonInFilter_returnsReadRecordsResponse()
+            throws Exception
+    {
+        Map<String, AttributeValue> expressionValues = ImmutableMap.of(":v0", DDBTypeUtils.toAttributeValue(VALUE_1));
+        Split split = createQuerySplitWithRangeFilter(RANGE_FILTER_EQUAL, expressionValues);
+
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                TEST_IDENTITY,
+                TEST_CATALOG_NAME,
+                TEST_QUERY_ID,
+                TEST_TABLE_NAME,
+                schema,
+                split,
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                SPILL_SIZE,
+                SPILL_SIZE);
+
+        RecordResponse rawResponse = handler.doReadRecords(allocator, request);
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+        assertNotNull("Response should not be null", response);
+    }
+
+    @Test
+    public void doReadRecords_withNoRangeFilter_returnsReadRecordsResponse()
+            throws Exception
+    {
+        Split split = createQuerySplitWithoutRangeFilter();
+
+        ReadRecordsRequest request = new ReadRecordsRequest(
+                TEST_IDENTITY,
+                TEST_CATALOG_NAME,
+                TEST_QUERY_ID,
+                TEST_TABLE_NAME,
+                schema,
+                split,
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                SPILL_SIZE,
+                SPILL_SIZE);
+
+        RecordResponse rawResponse = handler.doReadRecords(allocator, request);
+        assertTrue("Response should be ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+        assertNotNull("Response should not be null", response);
+    }
+
     private long getPackedDateTimeWithZone(String s)
     {
         ZonedDateTime zdt = ZonedDateTime.parse(s);
         return DateTimeFormatterUtil.timestampMilliTzHolderFromObject(zdt, null).value;
     }
+    private Split createQuerySplitWithRangeFilter(String rangeFilter, Map<String, AttributeValue> expressionValues)
+    {
+        Map<String, String> expressionNames = ImmutableMap.of("#col_1", COL_1);
+        return Split.newBuilder(SPILL_LOCATION, keyFactory.create())
+                .add(TABLE_METADATA, TEST_TABLE)
+                .add(HASH_KEY_NAME_METADATA, HASH_KEY_COL_0)
+                .add(HASH_KEY_COL_0, DDBTypeUtils.attributeToJson(DDBTypeUtils.toAttributeValue(TEST_STR_0), HASH_KEY_COL_0))
+                .add(RANGE_KEY_FILTER_METADATA, rangeFilter)
+                .add(EXPRESSION_NAMES_METADATA, toJsonString(expressionNames))
+                .add(EXPRESSION_VALUES_METADATA, EnhancedDocument.fromAttributeValueMap(expressionValues).toJson())
+                .build();
+    }
+
+    private Split createQuerySplitWithoutRangeFilter()
+    {
+        return Split.newBuilder(SPILL_LOCATION, keyFactory.create())
+                .add(TABLE_METADATA, TEST_TABLE)
+                .add(HASH_KEY_NAME_METADATA, HASH_KEY_COL_0)
+                .add(HASH_KEY_COL_0, DDBTypeUtils.attributeToJson(DDBTypeUtils.toAttributeValue(TEST_STR_0), HASH_KEY_COL_0))
+                .build();
+    }
+
+    private ReadRecordsRequest createReadRecordsRequest(TableName tableName, Schema schema, Split split, Constraints constraints)
+    {
+        return createReadRecordsRequest(tableName, schema, split, constraints, null);
+    }
+
+    private ReadRecordsRequest createReadRecordsRequest(TableName tableName, Schema schema, Split split, Constraints constraints, QueryPlan queryPlan)
+    {
+        Constraints finalConstraints = constraints;
+        if (queryPlan != null) {
+            finalConstraints = new Constraints(
+                    constraints.getSummary(),
+                    constraints.getExpression(),
+                    constraints.getOrderByClause(),
+                    constraints.getLimit(),
+                    constraints.getQueryPassthroughArguments(),
+                    queryPlan);
+        }
+        return new ReadRecordsRequest(
+                TEST_IDENTITY,
+                TEST_CATALOG_NAME,
+                TEST_QUERY_ID,
+                tableName,
+                schema,
+                split,
+                finalConstraints,
+                SPILL_SIZE,
+                SPILL_SIZE);
+    }
+
 }
