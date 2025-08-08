@@ -67,8 +67,8 @@ public class DataLakeGen2JdbcConnectionFactory extends GenericJdbcConnectionFact
                 Matcher secretMatcher = SECRET_NAME_PATTERN.matcher(databaseConnectionConfig.getJdbcConnectionString());
                 final String secretReplacement;
 
-                DataLakeGen2CredentialsProvider gen2Provider = (DataLakeGen2CredentialsProvider) credentialsProvider;
-                String accessToken = gen2Provider.getOAuthAccessToken();
+                Map<String, String> credentialMap = credentialsProvider.getCredentialMap();
+                String accessToken = credentialMap.get("accessToken");
 
                 if (accessToken != null) {
                     // OAuth token
@@ -76,8 +76,8 @@ public class DataLakeGen2JdbcConnectionFactory extends GenericJdbcConnectionFact
                     secretReplacement = "";
                 }
                 else {
-                    // Fallback to username/password and change username as user
-                    DefaultCredentials credentials = gen2Provider.getCredential();
+                    // Fallback to username/password
+                    DefaultCredentials credentials = credentialsProvider.getCredential();
                     secretReplacement = String.format(
                             "%s;%s",
                             "user=" + credentials.getUser(),
