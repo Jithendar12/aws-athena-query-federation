@@ -141,22 +141,32 @@ jobs:
 
           echo "=== Reorganizing Java 11 artifacts ==="
           if [ -d "/tmp/artifacts/java11-artifacts" ]; then
-            find /tmp/artifacts/java11-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_sdk_jars/ \;
-            find /tmp/artifacts/java11-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_connector_jars/ \;
-            find /tmp/artifacts/java11-artifacts -type f -name "*.zip" -exec cp {} /tmp/java11_connector_zips/ \;
-            echo "Java 11 SDK jars: $(ls /tmp/java11_sdk_jars/ | wc -l)"
+            # Find and copy all files with flexible path handling
+            find /tmp/artifacts/java11-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_sdk_jars/ \; 2>/dev/null || echo "No SDK jars found"
+            find /tmp/artifacts/java11-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_connector_jars/ \; 2>/dev/null || echo "No connector jars found"
+            find /tmp/artifacts/java11-artifacts -type f -name "*.zip" -exec cp {} /tmp/java11_connector_zips/ \; 2>/dev/null || echo "No connector zips found"
+            echo "Java 11 SDK jars: $(ls /tmp/java11_sdk_jars/ 2>/dev/null | wc -l)"
+            echo "Java 11 connector jars: $(ls /tmp/java11_connector_jars/ 2>/dev/null | wc -l)"
+            echo "Java 11 connector zips: $(ls /tmp/java11_connector_zips/ 2>/dev/null | wc -l)"
           else
             echo "ERROR: java11-artifacts directory not found!"
+            echo "Available directories:"
+            ls -la /tmp/artifacts/ 2>/dev/null || echo "No artifacts directory found"
           fi
 
           echo "=== Reorganizing Java 17 artifacts ==="
           if [ -d "/tmp/artifacts/java17-artifacts" ]; then
-            find /tmp/artifacts/java17-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_sdk_jars/ \;
-            find /tmp/artifacts/java17-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_connector_jars/ \;
-            find /tmp/artifacts/java17-artifacts -type f -name "*.zip" -exec cp {} /tmp/java17_connector_zips/ \;
-            echo "Java 17 SDK jars: $(ls /tmp/java17_sdk_jars/ | wc -l)"
+            # Find and copy all files with flexible path handling
+            find /tmp/artifacts/java17-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_sdk_jars/ \; 2>/dev/null || echo "No SDK jars found"
+            find /tmp/artifacts/java17-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_connector_jars/ \; 2>/dev/null || echo "No connector jars found"
+            find /tmp/artifacts/java17-artifacts -type f -name "*.zip" -exec cp {} /tmp/java17_connector_zips/ \; 2>/dev/null || echo "No connector zips found"
+            echo "Java 17 SDK jars: $(ls /tmp/java17_sdk_jars/ 2>/dev/null | wc -l)"
+            echo "Java 17 connector jars: $(ls /tmp/java17_connector_jars/ 2>/dev/null | wc -l)"
+            echo "Java 17 connector zips: $(ls /tmp/java17_connector_zips/ 2>/dev/null | wc -l)"
           else
             echo "ERROR: java17-artifacts directory not found!"
+            echo "Available directories:"
+            ls -la /tmp/artifacts/ 2>/dev/null || echo "No artifacts directory found"
           fi
 
       - name: Create the release on github
@@ -207,11 +217,29 @@ jobs:
             -t "Release v$NEW_RELEASE_VERSION of Athena Query Federation" \
             --notes-file /tmp/RELEASE_NOTES
           # Upload the jar attachments for both Java versions
-          gh release upload "v$NEW_RELEASE_VERSION" \
-            $(find /tmp/java11_sdk_jars -type f 2>/dev/null || true) \
-            $(find /tmp/java11_connector_jars -type f 2>/dev/null || true) \
-            $(find /tmp/java11_connector_zips -type f 2>/dev/null || true) \
-            $(find /tmp/java17_sdk_jars -type f 2>/dev/null || true) \
-            $(find /tmp/java17_connector_jars -type f 2>/dev/null || true) \
-            $(find /tmp/java17_connector_zips -type f 2>/dev/null || true) \
-            --clobber
+          echo "=== Final artifact counts before upload ==="
+          echo "Java 11 SDK jars: $(find /tmp/java11_sdk_jars -type f 2>/dev/null | wc -l)"
+          echo "Java 11 connector jars: $(find /tmp/java11_connector_jars -type f 2>/dev/null | wc -l)"
+          echo "Java 11 connector zips: $(find /tmp/java11_connector_zips -type f 2>/dev/null | wc -l)"
+          echo "Java 17 SDK jars: $(find /tmp/java17_sdk_jars -type f 2>/dev/null | wc -l)"
+          echo "Java 17 connector jars: $(find /tmp/java17_connector_jars -type f 2>/dev/null | wc -l)"
+          echo "Java 17 connector zips: $(find /tmp/java17_connector_zips -type f 2>/dev/null | wc -l)"
+          
+          # Collect all files to upload
+          ALL_FILES=""
+          for dir in /tmp/java11_sdk_jars /tmp/java11_connector_jars /tmp/java11_connector_zips /tmp/java17_sdk_jars /tmp/java17_connector_jars /tmp/java17_connector_zips; do
+            if [ -d "$dir" ]; then
+              FILES=$(find "$dir" -type f 2>/dev/null || true)
+              if [ -n "$FILES" ]; then
+                ALL_FILES="$ALL_FILES $FILES"
+              fi
+            fi
+          done
+          
+          if [ -n "$ALL_FILES" ]; then
+            echo "Uploading $(echo $ALL_FILES | wc -w) files..."
+            gh release upload "v$NEW_RELEASE_VERSION" $ALL_FILES --clobber
+          else
+            echo "ERROR: No files found to upload!"
+            exit 1
+          fi
