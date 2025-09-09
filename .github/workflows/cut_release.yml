@@ -44,9 +44,11 @@ jobs:
           echo "NEW_RELEASE_VERSION=$NEW_RELEASE_VERSION" >> $GITHUB_ENV
 
       - name: Create branch locally on the runner
+        if: ${{ matrix.java-version == '17' }}
         run: git checkout -b release_${NEW_RELEASE_VERSION} origin/master
 
       - name: Bump the versions in the branch
+        if: ${{ matrix.java-version == '17' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -55,17 +57,40 @@ jobs:
 
       # See: https://joht.github.io/johtizen/build/2022/01/20/github-actions-push-into-repository.html
       - name: Setup workflow git committer user
+        if: ${{ matrix.java-version == '17' }}
         run: |
           git config --global user.name "athena_federation_cut_release_workflow"
           git config --global user.email "athena_federation_cut_release_workflow@users.noreply.github.com"
 
       - name: Create the release bump commit
+        if: ${{ matrix.java-version == '17' }}
         run: |
           echo "Cut release $NEW_RELEASE_VERSION" > /tmp/RELEASE_MESSAGE
           echo >> /tmp/RELEASE_MESSAGE
           git fetch --tag origin
           git log --format='  - %s' $PREVIOUS_RELEASE_TAG..HEAD >> /tmp/RELEASE_MESSAGE
           git commit -a -F /tmp/RELEASE_MESSAGE
+
+      - name: Push the release branch (initial)
+        if: ${{ matrix.java-version == '17' }}
+        run: |
+          git push origin release_${NEW_RELEASE_VERSION}:release_${NEW_RELEASE_VERSION}
+
+      - name: Wait and checkout release branch (Java 11)
+        if: ${{ matrix.java-version == '11' }}
+        run: |
+          # Wait a bit for Java 17 job to create the branch
+          for i in {1..30}; do
+            if git ls-remote --heads origin release_${NEW_RELEASE_VERSION} | grep -q release_${NEW_RELEASE_VERSION}; then
+              echo "Release branch found, checking out..."
+              git fetch origin
+              git checkout release_${NEW_RELEASE_VERSION}
+              break
+            else
+              echo "Waiting for release branch to be created... ($i/30)"
+              sleep 10
+            fi
+          done
 
       - name: Build Java ${{ matrix.java-version }} jars
         run: |
@@ -92,11 +117,6 @@ jobs:
             /tmp/java${{ matrix.java-version }}_sdk_jars/
             /tmp/java${{ matrix.java-version }}_connector_jars/
             /tmp/java${{ matrix.java-version }}_connector_zips/
-
-      - name: Push the release branch
-        if: ${{ matrix.java-version == '17' }}
-        run: |
-          git push origin release_${NEW_RELEASE_VERSION}:release_${NEW_RELEASE_VERSION}
 
       - name: Sync up with origin again now that the new branch has been pushed
         if: ${{ matrix.java-version == '17' }}
