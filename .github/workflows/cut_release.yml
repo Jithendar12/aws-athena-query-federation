@@ -8,6 +8,7 @@ jobs:
     name: Cut a release
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         java-version: ['11', '17']
     steps:
@@ -83,6 +84,15 @@ jobs:
           mkdir -p /tmp/java${{ matrix.java-version }}_connector_zips/
           find athena-*/target/ -name "*.zip" -type f | grep -v "test" | grep -v "arrow" | grep -v "/original" | grep -v "example" | grep -v "\-sdk-" | grep -v "\-dsv2/" | xargs -I{} cp {} /tmp/java${{ matrix.java-version }}_connector_zips/
 
+      - name: Upload Java ${{ matrix.java-version }} artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: java${{ matrix.java-version }}-artifacts
+          path: |
+            /tmp/java${{ matrix.java-version }}_sdk_jars/
+            /tmp/java${{ matrix.java-version }}_connector_jars/
+            /tmp/java${{ matrix.java-version }}_connector_zips/
+
       - name: Push the release branch
         if: ${{ matrix.java-version == '17' }}
         run: |
@@ -94,6 +104,33 @@ jobs:
           git fetch origin
           git status
           git pull --rebase origin release_${NEW_RELEASE_VERSION}
+
+      - name: Download all Java artifacts
+        if: ${{ matrix.java-version == '17' }}
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/artifacts
+
+      - name: Reorganize downloaded artifacts
+        if: ${{ matrix.java-version == '17' }}
+        run: |
+          # Reorganize artifacts back to expected structure
+          mkdir -p /tmp/java11_sdk_jars /tmp/java11_connector_jars /tmp/java11_connector_zips
+          mkdir -p /tmp/java17_sdk_jars /tmp/java17_connector_jars /tmp/java17_connector_zips
+          
+          # Copy Java 11 artifacts if they exist
+          if [ -d "/tmp/artifacts/java11-artifacts" ]; then
+            cp -r /tmp/artifacts/java11-artifacts/tmp/java11_sdk_jars/* /tmp/java11_sdk_jars/ 2>/dev/null || true
+            cp -r /tmp/artifacts/java11-artifacts/tmp/java11_connector_jars/* /tmp/java11_connector_jars/ 2>/dev/null || true
+            cp -r /tmp/artifacts/java11-artifacts/tmp/java11_connector_zips/* /tmp/java11_connector_zips/ 2>/dev/null || true
+          fi
+          
+          # Copy Java 17 artifacts if they exist  
+          if [ -d "/tmp/artifacts/java17-artifacts" ]; then
+            cp -r /tmp/artifacts/java17-artifacts/tmp/java17_sdk_jars/* /tmp/java17_sdk_jars/ 2>/dev/null || true
+            cp -r /tmp/artifacts/java17-artifacts/tmp/java17_connector_jars/* /tmp/java17_connector_jars/ 2>/dev/null || true
+            cp -r /tmp/artifacts/java17-artifacts/tmp/java17_connector_zips/* /tmp/java17_connector_zips/ 2>/dev/null || true
+          fi
 
       - name: Create the release on github
         if: ${{ matrix.java-version == '17' }}
@@ -111,36 +148,25 @@ jobs:
           
           You can assert the validity of the binary distribution by comparing against the below cksums.
           
-          Athena Federation SDK jars (Java 11)
+          EOF
+
+          # Generate checksum tables for both Java versions and all artifact types
+          for java_version in 11 17; do
+            for artifact_type in "sdk_jars:Athena Federation SDK jars" "connector_jars:Athena Federation Connector Lambda jars" "connector_zips:Athena Federation Connector Lambda zips"; do
+              dir_suffix=$(echo $artifact_type | cut -d: -f1)
+              display_name=$(echo $artifact_type | cut -d: -f2)
+              
+              cat <<EOF >> /tmp/RELEASE_NOTES
+          ${display_name} (Java ${java_version})
           |CheckSum|File|
           |----------|----|
-          $(cd /tmp/java11_sdk_jars && ls | xargs -I{} cksum {} | sed 's/\([0-9]\) \([a-zA-Z]\)/\1|\2/g' | sed 's/^/|/g' | sed 's/$/|/g')
+          $(cd /tmp/java${java_version}_${dir_suffix} 2>/dev/null && ls 2>/dev/null | xargs -I{} cksum {} 2>/dev/null | sed 's/\([0-9]\) \([a-zA-Z]\)/\1|\2/g' | sed 's/^/|/g' | sed 's/$/|/g' || echo "|No files found|")
 
-          Athena Federation SDK jars (Java 17)
-          |CheckSum|File|
-          |----------|----|
-          $(cd /tmp/java17_sdk_jars && ls | xargs -I{} cksum {} | sed 's/\([0-9]\) \([a-zA-Z]\)/\1|\2/g' | sed 's/^/|/g' | sed 's/$/|/g')
+          EOF
+            done
+          done
 
-          Athena Federation Connector Lambda jars (Java 11)
-          |CheckSum|File|
-          |----------|----|
-          $(cd /tmp/java11_connector_jars && ls | xargs -I{} cksum {} | sed 's/\([0-9]\) \([a-zA-Z]\)/\1|\2/g' | sed 's/^/|/g' | sed 's/$/|/g')
-
-          Athena Federation Connector Lambda jars (Java 17)
-          |CheckSum|File|
-          |----------|----|
-          $(cd /tmp/java17_connector_jars && ls | xargs -I{} cksum {} | sed 's/\([0-9]\) \([a-zA-Z]\)/\1|\2/g' | sed 's/^/|/g' | sed 's/$/|/g')
-
-          Athena Federation Connector Lambda zips (Java 11)
-          |CheckSum|File|
-          |----------|----|
-          $(cd /tmp/java11_connector_zips && ls | xargs -I{} cksum {} | sed 's/\([0-9]\) \([a-zA-Z]\)/\1|\2/g' | sed 's/^/|/g' | sed 's/$/|/g')
-
-          Athena Federation Connector Lambda zips (Java 17)
-          |CheckSum|File|
-          |----------|----|
-          $(cd /tmp/java17_connector_zips && ls | xargs -I{} cksum {} | sed 's/\([0-9]\) \([a-zA-Z]\)/\1|\2/g' | sed 's/^/|/g' | sed 's/$/|/g')
-
+          cat <<EOF >> /tmp/RELEASE_NOTES
           ## What's Changed
           $(git log --format='- %s' v$PREVIOUS_RELEASE_VERSION..HEAD~1)
           
@@ -155,10 +181,10 @@ jobs:
             --notes-file /tmp/RELEASE_NOTES
           # Upload the jar attachments for both Java versions
           gh release upload "v$NEW_RELEASE_VERSION" \
-            $(find /tmp/java11_sdk_jars -type f) \
-            $(find /tmp/java11_connector_jars -type f) \
-            $(find /tmp/java11_connector_zips -type f) \
-            $(find /tmp/java17_sdk_jars -type f) \
-            $(find /tmp/java17_connector_jars -type f) \
-            $(find /tmp/java17_connector_zips -type f) \
+            $(find /tmp/java11_sdk_jars -type f 2>/dev/null || true) \
+            $(find /tmp/java11_connector_jars -type f 2>/dev/null || true) \
+            $(find /tmp/java11_connector_zips -type f 2>/dev/null || true) \
+            $(find /tmp/java17_sdk_jars -type f 2>/dev/null || true) \
+            $(find /tmp/java17_connector_jars -type f 2>/dev/null || true) \
+            $(find /tmp/java17_connector_zips -type f 2>/dev/null || true) \
             --clobber
