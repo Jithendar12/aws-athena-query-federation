@@ -6,7 +6,7 @@ on:
 jobs:
   cut_release:
     name: Cut a release
-    runs-on: ubuntu-latest
+    runs-on: aws-athena-query-federation_ubuntu-latest_16-core
     strategy:
       matrix:
         java-version: ['11', '17']
@@ -81,7 +81,6 @@ jobs:
       - name: Wait and checkout release branch (Java 11)
         if: ${{ matrix.java-version == '11' }}
         run: |
-          # Wait a bit for Java 17 job to create the branch
           for i in {1..30}; do
             if git ls-remote --heads origin release_${NEW_RELEASE_VERSION} | grep -q release_${NEW_RELEASE_VERSION}; then
               echo "Release branch found, checking out..."
@@ -120,38 +119,6 @@ jobs:
             /tmp/java${{ matrix.java-version }}_connector_jars/
             /tmp/java${{ matrix.java-version }}_connector_zips/
 
-      - name: Sync up with origin again now that the new branch has been pushed
-        if: ${{ matrix.java-version == '17' }}
-        run: |
-          git fetch origin
-          git status
-          git pull --rebase origin release_${NEW_RELEASE_VERSION}
-
-      - name: Wait for Java 11 artifacts to be uploaded
-        if: ${{ matrix.java-version == '17' }}
-        run: |
-          echo "Waiting for Java 11 job to upload artifacts..."
-          # Wait for Java 11 artifacts to be available (Java 17 has already uploaded its own artifacts)
-          for i in {1..60}; do
-            java11_ready=$(gh api repos/${{ github.repository }}/actions/artifacts --jq '.artifacts[] | select(.name=="java11-artifacts") | .name' || echo "")
-            
-            if [[ "$java11_ready" == "java11-artifacts" ]]; then
-              echo "Java 11 artifacts are ready! Both Java 11 and 17 artifacts should now be available."
-              break
-            else
-              echo "Waiting for Java 11 artifacts... ($i/60) Status: $java11_ready"
-              sleep 10
-            fi
-            
-            # Timeout check
-            if [[ $i -eq 60 ]]; then
-              echo "ERROR: Timeout waiting for Java 11 artifacts. Java 11 job may have failed."
-              exit 1
-            fi
-          done
-        env:
-          GH_TOKEN: ${{ github.token }}
-
       - name: Download all Java artifacts
         if: ${{ matrix.java-version == '17' }}
         uses: actions/download-artifact@v4
@@ -165,42 +132,29 @@ jobs:
           find /tmp/artifacts -type f | head -20
           echo "=== Directories ==="
           find /tmp/artifacts -type d
-          echo "=== Java 11 artifacts check ==="
-          ls -la /tmp/artifacts/java11-artifacts/ 2>/dev/null || echo "java11-artifacts directory not found"
-          echo "=== Java 17 artifacts check ==="
-          ls -la /tmp/artifacts/java17-artifacts/ 2>/dev/null || echo "java17-artifacts directory not found"
 
       - name: Reorganize downloaded artifacts
         if: ${{ matrix.java-version == '17' }}
         run: |
-          # Reorganize artifacts back to expected structure
           mkdir -p /tmp/java11_sdk_jars /tmp/java11_connector_jars /tmp/java11_connector_zips
           mkdir -p /tmp/java17_sdk_jars /tmp/java17_connector_jars /tmp/java17_connector_zips
-          
+
           echo "=== Reorganizing Java 11 artifacts ==="
-          # Copy Java 11 artifacts if they exist
-          if [ -d "/tmp/artifacts/java11-artifacts" ]; then
-            echo "Found java11-artifacts directory"
-            cp -r /tmp/artifacts/java11-artifacts/tmp/java11_sdk_jars/* /tmp/java11_sdk_jars/ 2>/dev/null || echo "No SDK jars found"
-            cp -r /tmp/artifacts/java11-artifacts/tmp/java11_connector_jars/* /tmp/java11_connector_jars/ 2>/dev/null || echo "No connector jars found"
-            cp -r /tmp/artifacts/java11-artifacts/tmp/java11_connector_zips/* /tmp/java11_connector_zips/ 2>/dev/null || echo "No connector zips found"
+          if [ -d "/tmp/artifacts/java11-artifacts/java11_sdk_jars" ]; then
+            cp -r /tmp/artifacts/java11-artifacts/java11_sdk_jars/* /tmp/java11_sdk_jars/ 2>/dev/null || echo "No SDK jars found"
+            cp -r /tmp/artifacts/java11-artifacts/java11_connector_jars/* /tmp/java11_connector_jars/ 2>/dev/null || echo "No connector jars found"
+            cp -r /tmp/artifacts/java11-artifacts/java11_connector_zips/* /tmp/java11_connector_zips/ 2>/dev/null || echo "No connector zips found"
             echo "Java 11 SDK jars: $(ls /tmp/java11_sdk_jars/ | wc -l)"
-            echo "Java 11 connector jars: $(ls /tmp/java11_connector_jars/ | wc -l)"
-            echo "Java 11 connector zips: $(ls /tmp/java11_connector_zips/ | wc -l)"
           else
             echo "ERROR: java11-artifacts directory not found!"
           fi
-          
+
           echo "=== Reorganizing Java 17 artifacts ==="
-          # Copy Java 17 artifacts if they exist  
-          if [ -d "/tmp/artifacts/java17-artifacts" ]; then
-            echo "Found java17-artifacts directory"
-            cp -r /tmp/artifacts/java17-artifacts/tmp/java17_sdk_jars/* /tmp/java17_sdk_jars/ 2>/dev/null || echo "No SDK jars found"
-            cp -r /tmp/artifacts/java17-artifacts/tmp/java17_connector_jars/* /tmp/java17_connector_jars/ 2>/dev/null || echo "No connector jars found"
-            cp -r /tmp/artifacts/java17-artifacts/tmp/java17_connector_zips/* /tmp/java17_connector_zips/ 2>/dev/null || echo "No connector zips found"
+          if [ -d "/tmp/artifacts/java17-artifacts/java17_sdk_jars" ]; then
+            cp -r /tmp/artifacts/java17-artifacts/java17_sdk_jars/* /tmp/java17_sdk_jars/ 2>/dev/null || echo "No SDK jars found"
+            cp -r /tmp/artifacts/java17-artifacts/java17_connector_jars/* /tmp/java17_connector_jars/ 2>/dev/null || echo "No connector jars found"
+            cp -r /tmp/artifacts/java17-artifacts/java17_connector_zips/* /tmp/java17_connector_zips/ 2>/dev/null || echo "No connector zips found"
             echo "Java 17 SDK jars: $(ls /tmp/java17_sdk_jars/ | wc -l)"
-            echo "Java 17 connector jars: $(ls /tmp/java17_connector_jars/ | wc -l)"
-            echo "Java 17 connector zips: $(ls /tmp/java17_connector_zips/ | wc -l)"
           else
             echo "ERROR: java17-artifacts directory not found!"
           fi
