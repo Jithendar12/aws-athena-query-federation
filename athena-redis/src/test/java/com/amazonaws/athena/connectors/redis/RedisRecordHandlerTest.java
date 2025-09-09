@@ -19,8 +19,11 @@
  */
 package com.amazonaws.athena.connectors.redis;
 
+import com.amazonaws.athena.connector.lambda.QueryStatusChecker;
+import com.amazonaws.athena.connector.lambda.data.Block;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
+import com.amazonaws.athena.connector.lambda.data.BlockSpiller;
 import com.amazonaws.athena.connector.lambda.data.BlockUtils;
 import com.amazonaws.athena.connector.lambda.data.S3BlockSpillReader;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
@@ -38,6 +41,7 @@ import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
 import com.amazonaws.athena.connectors.redis.lettuce.RedisCommandsWrapper;
 import com.amazonaws.athena.connectors.redis.lettuce.RedisConnectionFactory;
 import com.amazonaws.athena.connectors.redis.lettuce.RedisConnectionWrapper;
+import com.amazonaws.athena.connectors.redis.qpt.RedisQueryPassthrough;
 import com.amazonaws.athena.connectors.redis.util.MockKeyScanCursor;
 import com.amazonaws.athena.connectors.redis.util.MockScoredValueScanCursor;
 import com.google.common.collect.ImmutableList;
@@ -45,6 +49,7 @@ import com.google.common.io.ByteStreams;
 import io.lettuce.core.ScanArgs;
 import io.lettuce.core.ScanCursor;
 import io.lettuce.core.ScoredValue;
+import io.lettuce.core.ScriptOutputType;
 import org.apache.arrow.vector.complex.reader.FieldReader;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -60,9 +65,9 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import software.amazon.awssdk.services.athena.AthenaClient;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.athena.AthenaClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -75,6 +80,7 @@ import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRespon
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -86,13 +92,19 @@ import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.KEY_COLUMN_NAME;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.KEY_PREFIX_TABLE_PROP;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.KEY_TYPE;
+import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.QPT_COLUMN_NAME;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.REDIS_ENDPOINT_PROP;
 import static com.amazonaws.athena.connectors.redis.RedisMetadataHandler.VALUE_TYPE_TABLE_PROP;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -482,6 +494,71 @@ public class RedisRecordHandlerTest
         FieldReader intCol = response.getRecords().getFieldReader("intcol");
         intCol.setPosition(0);
         assertNotNull(intCol.readInteger());
+    }
+
+    @Test
+    public void testReadWithConstraint_withQueryPassthrough()
+    {
+        List<Object> evalResult = Arrays.asList("value1", Arrays.asList("value2", "value3"), "value4");
+
+        Map<String, String> passthroughArgs = Map.of(
+                RedisQueryPassthrough.SCRIPT, "return redis.call(\"GET\", KEYS[1])",
+                RedisQueryPassthrough.KEYS, "[\"l:a\"]",
+                RedisQueryPassthrough.ARGV, "[]",
+                "schemaFunctionName", "system.script",
+                "enableQueryPassthrough", "true",
+                "name", "script",
+                "schema", "system"
+        );
+
+        Split mockSplit = mock(Split.class);
+        when(mockSplit.getProperty("redis-endpoint")).thenReturn("localhost:6379");
+        when(mockSplit.getProperty("redis-db-number")).thenReturn("0");
+
+        ReadRecordsRequest mockRequest = mock(ReadRecordsRequest.class);
+        Constraints mockConstraints = mock(Constraints.class);
+        when(mockConstraints.isQueryPassThrough()).thenReturn(true);
+        when(mockConstraints.getQueryPassthroughArguments()).thenReturn(passthroughArgs);
+        when(mockRequest.getConstraints()).thenReturn(mockConstraints);
+        when(mockRequest.getSplit()).thenReturn(mockSplit);
+
+        RedisCommandsWrapper<String, String> mockRedisCommands = mock(RedisCommandsWrapper.class);
+        when(mockRedisCommands.evalReadOnly(any(), eq(ScriptOutputType.MULTI), any(), any())).thenReturn(evalResult);
+
+        RedisConnectionWrapper<String, String> mockConnection = mock(RedisConnectionWrapper.class);
+        when(mockConnection.sync()).thenReturn(mockRedisCommands);
+
+        RedisConnectionFactory mockFactory = mock(RedisConnectionFactory.class);
+        when(mockFactory.getOrCreateConn(anyString(), anyBoolean(), anyBoolean(), anyString()))
+                .thenReturn(mockConnection);
+
+        handler = new RedisRecordHandler(amazonS3, mockSecretsManager, mockAthena, mockFactory, com.google.common.collect.ImmutableMap.of());
+
+        // Mocking the BlockSpiller and QueryStatusChecker
+        Block mockBlock = mock(Block.class);
+        StringBuilder writtenValues = new StringBuilder();
+        doAnswer(invocation -> {
+            String val = invocation.getArgument(2);
+            if (writtenValues.length() > 0) {
+                writtenValues.append(", ");
+            }
+            writtenValues.append(val);
+            return true;
+        }).when(mockBlock).offerValue(eq(QPT_COLUMN_NAME), anyInt(), anyString());
+
+        BlockSpiller mockSpiller = mock(BlockSpiller.class);
+        doAnswer(invocation -> {
+            BlockSpiller.RowWriter rowWriter = invocation.getArgument(0);
+            rowWriter.writeRows(mockBlock, 0);
+            return null;
+        }).when(mockSpiller).writeRows(any());
+
+        QueryStatusChecker mockStatusChecker = mock(QueryStatusChecker.class);
+        when(mockStatusChecker.isQueryRunning()).thenReturn(true);
+
+        handler.readWithConstraint(mockSpiller, mockRequest, mockStatusChecker);
+
+        assertEquals("value1, value2, value3, value4", writtenValues.toString());
     }
 
     private class ByteHolder
