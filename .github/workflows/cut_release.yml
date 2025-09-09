@@ -127,21 +127,26 @@ jobs:
           git status
           git pull --rebase origin release_${NEW_RELEASE_VERSION}
 
-      - name: Wait for all artifacts to be uploaded
+      - name: Wait for Java 11 artifacts to be uploaded
         if: ${{ matrix.java-version == '17' }}
         run: |
-          echo "Waiting for both Java 11 and Java 17 jobs to upload artifacts..."
-          # Wait for both artifacts to be available
+          echo "Waiting for Java 11 job to upload artifacts..."
+          # Wait for Java 11 artifacts to be available (Java 17 has already uploaded its own artifacts)
           for i in {1..60}; do
             java11_ready=$(gh api repos/${{ github.repository }}/actions/artifacts --jq '.artifacts[] | select(.name=="java11-artifacts") | .name' || echo "")
-            java17_ready=$(gh api repos/${{ github.repository }}/actions/artifacts --jq '.artifacts[] | select(.name=="java17-artifacts") | .name' || echo "")
             
-            if [[ "$java11_ready" == "java11-artifacts" && "$java17_ready" == "java17-artifacts" ]]; then
-              echo "Both artifacts are ready!"
+            if [[ "$java11_ready" == "java11-artifacts" ]]; then
+              echo "Java 11 artifacts are ready! Both Java 11 and 17 artifacts should now be available."
               break
             else
-              echo "Waiting for artifacts... ($i/60) Java11: $java11_ready, Java17: $java17_ready"
+              echo "Waiting for Java 11 artifacts... ($i/60) Status: $java11_ready"
               sleep 10
+            fi
+            
+            # Timeout check
+            if [[ $i -eq 60 ]]; then
+              echo "ERROR: Timeout waiting for Java 11 artifacts. Java 11 job may have failed."
+              exit 1
             fi
           done
         env:
