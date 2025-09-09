@@ -6,7 +6,7 @@ on:
 jobs:
   cut_release:
     name: Cut a release
-    runs-on: ubuntu-latest
+    runs-on: aws-athena-query-federation_ubuntu-latest_16-core
     strategy:
       matrix:
         java-version: ['11', '17']
@@ -140,20 +140,20 @@ jobs:
           mkdir -p /tmp/java17_sdk_jars /tmp/java17_connector_jars /tmp/java17_connector_zips
 
           echo "=== Reorganizing Java 11 artifacts ==="
-          if [ -d "/tmp/artifacts/java11-artifacts/java11_sdk_jars" ]; then
-            cp -r /tmp/artifacts/java11-artifacts/java11_sdk_jars/* /tmp/java11_sdk_jars/ 2>/dev/null || echo "No SDK jars found"
-            cp -r /tmp/artifacts/java11-artifacts/java11_connector_jars/* /tmp/java11_connector_jars/ 2>/dev/null || echo "No connector jars found"
-            cp -r /tmp/artifacts/java11-artifacts/java11_connector_zips/* /tmp/java11_connector_zips/ 2>/dev/null || echo "No connector zips found"
+          if [ -d "/tmp/artifacts/java11-artifacts" ]; then
+            find /tmp/artifacts/java11-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_sdk_jars/ \;
+            find /tmp/artifacts/java11-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_connector_jars/ \;
+            find /tmp/artifacts/java11-artifacts -type f -name "*.zip" -exec cp {} /tmp/java11_connector_zips/ \;
             echo "Java 11 SDK jars: $(ls /tmp/java11_sdk_jars/ | wc -l)"
           else
             echo "ERROR: java11-artifacts directory not found!"
           fi
 
           echo "=== Reorganizing Java 17 artifacts ==="
-          if [ -d "/tmp/artifacts/java17-artifacts/java17_sdk_jars" ]; then
-            cp -r /tmp/artifacts/java17-artifacts/java17_sdk_jars/* /tmp/java17_sdk_jars/ 2>/dev/null || echo "No SDK jars found"
-            cp -r /tmp/artifacts/java17-artifacts/java17_connector_jars/* /tmp/java17_connector_jars/ 2>/dev/null || echo "No connector jars found"
-            cp -r /tmp/artifacts/java17-artifacts/java17_connector_zips/* /tmp/java17_connector_zips/ 2>/dev/null || echo "No connector zips found"
+          if [ -d "/tmp/artifacts/java17-artifacts" ]; then
+            find /tmp/artifacts/java17-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_sdk_jars/ \;
+            find /tmp/artifacts/java17-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_connector_jars/ \;
+            find /tmp/artifacts/java17-artifacts -type f -name "*.zip" -exec cp {} /tmp/java17_connector_zips/ \;
             echo "Java 17 SDK jars: $(ls /tmp/java17_sdk_jars/ | wc -l)"
           else
             echo "ERROR: java17-artifacts directory not found!"
@@ -182,7 +182,7 @@ jobs:
             for artifact_type in "sdk_jars:Athena Federation SDK jars" "connector_jars:Athena Federation Connector Lambda jars" "connector_zips:Athena Federation Connector Lambda zips"; do
               dir_suffix=$(echo $artifact_type | cut -d: -f1)
               display_name=$(echo $artifact_type | cut -d: -f2)
-              
+          
               cat <<EOF >> /tmp/RELEASE_NOTES
           ${display_name} (Java ${java_version})
           |CheckSum|File|
