@@ -197,6 +197,26 @@ jobs:
             ls -la /tmp/artifacts/ 2>/dev/null || echo "No artifacts directory found"
           fi
 
+      - name: Verify release branch and get commit SHA
+        if: ${{ matrix.java-version == '17' }}
+        run: |
+          # Ensure we're on the release branch and get the current commit SHA
+          CURRENT_BRANCH=$(git branch --show-current)
+          CURRENT_COMMIT=$(git rev-parse HEAD)
+          echo "Current branch: $CURRENT_BRANCH"
+          echo "Current commit: $CURRENT_COMMIT"
+          echo "RELEASE_COMMIT_SHA=$CURRENT_COMMIT" >> $GITHUB_ENV
+          
+          # Verify the release branch exists remotely
+          if git ls-remote --heads origin release_${NEW_RELEASE_VERSION} | grep -q release_${NEW_RELEASE_VERSION}; then
+            echo "Release branch exists remotely: release_${NEW_RELEASE_VERSION}"
+            REMOTE_COMMIT=$(git ls-remote origin release_${NEW_RELEASE_VERSION} | cut -f1)
+            echo "Remote commit: $REMOTE_COMMIT"
+            echo "REMOTE_RELEASE_COMMIT=$REMOTE_COMMIT" >> $GITHUB_ENV
+          else
+            echo "Warning: Release branch not found remotely"
+          fi
+
       - name: Create the release on github
         if: ${{ matrix.java-version == '17' }}
         env:
@@ -239,9 +259,22 @@ jobs:
           EOF
           # ------------------------------------------------------------------------------------------
           
+          # Determine the best target for the release
+          RELEASE_TARGET=""
+          if [ -n "$REMOTE_RELEASE_COMMIT" ]; then
+            RELEASE_TARGET="$REMOTE_RELEASE_COMMIT"
+            echo "Using remote release commit as target: $REMOTE_RELEASE_COMMIT"
+          elif [ -n "$RELEASE_COMMIT_SHA" ]; then
+            RELEASE_TARGET="$RELEASE_COMMIT_SHA"
+            echo "Using local release commit as target: $RELEASE_COMMIT_SHA"
+          else
+            RELEASE_TARGET="release_${NEW_RELEASE_VERSION}"
+            echo "Using release branch as target: $RELEASE_TARGET"
+          fi
+          
           # Create the draft github release:
           gh release create "v$NEW_RELEASE_VERSION" -d --latest \
-            --target release_${NEW_RELEASE_VERSION} \
+            --target "$RELEASE_TARGET" \
             -t "Release v$NEW_RELEASE_VERSION of Athena Query Federation" \
             --notes-file /tmp/RELEASE_NOTES
           # Upload the jar attachments for both Java versions
