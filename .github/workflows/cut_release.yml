@@ -119,6 +119,19 @@ jobs:
             /tmp/java${{ matrix.java-version }}_connector_jars/
             /tmp/java${{ matrix.java-version }}_connector_zips/
 
+      - name: Wait for Java 11 artifacts
+        if: ${{ matrix.java-version == '17' }}
+        run: |
+          for i in {1..30}; do
+            echo "Checking if Java 11 artifacts are available... ($i/30)"
+            if gh run view ${{ github.run_id }} --json artifacts --jq '.artifacts[].name' | grep -q "java11-artifacts"; then
+              echo "Java 11 artifacts found!"
+              break
+            fi
+            echo "Java 11 artifacts not ready yet, waiting 10s..."
+            sleep 10
+          done
+
       - name: Download all Java artifacts
         if: ${{ matrix.java-version == '17' }}
         uses: actions/download-artifact@v4
