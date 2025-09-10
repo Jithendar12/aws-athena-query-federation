@@ -6,7 +6,7 @@ on:
 jobs:
   cut_release:
     name: Cut a release
-    runs-on: aws-athena-query-federation_ubuntu-latest_16-core
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         java-version: ['11', '17']
@@ -32,7 +32,7 @@ jobs:
       - name: Setup previous release version environment variable
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "PREVIOUS_RELEASE_VERSION=$(gh release list --exclude-drafts --exclude-pre-releases -L 1 | sed 's/.*\s\+Latest\s\+v\(.*\)\s\+.*/\1/g')" >> $GITHUB_ENV
+        run: echo "PREVIOUS_RELEASE_VERSION=$(gh release list --exclude-drafts --exclude-pre-releases -L 1 --repo "${{ github.repository }}" | sed 's/.*\s\+Latest\s\+v\(.*\)\s\+.*/\1/g')" >> $GITHUB_ENV
 
       - name: Setup previous release version tag environment variable
         run: echo "PREVIOUS_RELEASE_TAG=v$PREVIOUS_RELEASE_VERSION" >> $GITHUB_ENV
@@ -129,11 +129,11 @@ jobs:
           echo "Waiting for both Java 11 and Java 17 artifacts to be uploaded..."
           for i in {1..60}; do
             # Check if both artifacts exist
-            JAVA11_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java11-artifacts") | .name' | wc -l)
-            JAVA17_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java17-artifacts") | .name' | wc -l)
-            
+            JAVA11_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java11-artifacts") | .name' --repo "${{ github.repository }}" | wc -l)
+            JAVA17_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java17-artifacts") | .name' --repo "${{ github.repository }}" | wc -l)
+          
             echo "Attempt $i: Java 11 artifacts: $JAVA11_COUNT, Java 17 artifacts: $JAVA17_COUNT"
-            
+          
             if [ "$JAVA11_COUNT" -eq "1" ] && [ "$JAVA17_COUNT" -eq "1" ]; then
               echo "Both artifacts are now available!"
               break
@@ -141,7 +141,7 @@ jobs:
               echo "Waiting for artifacts... (${i}/60)"
               sleep 10
             fi
-            
+          
             if [ "$i" -eq "60" ]; then
               echo "Timeout waiting for artifacts. Proceeding anyway..."
             fi
@@ -169,7 +169,6 @@ jobs:
 
           echo "=== Reorganizing Java 11 artifacts ==="
           if [ -d "/tmp/artifacts/java11-artifacts" ]; then
-            # Find and copy all files with flexible path handling
             find /tmp/artifacts/java11-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_sdk_jars/ \; 2>/dev/null || echo "No SDK jars found"
             find /tmp/artifacts/java11-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_connector_jars/ \; 2>/dev/null || echo "No connector jars found"
             find /tmp/artifacts/java11-artifacts -type f -name "*.zip" -exec cp {} /tmp/java11_connector_zips/ \; 2>/dev/null || echo "No connector zips found"
@@ -178,13 +177,11 @@ jobs:
             echo "Java 11 connector zips: $(ls /tmp/java11_connector_zips/ 2>/dev/null | wc -l)"
           else
             echo "ERROR: java11-artifacts directory not found!"
-            echo "Available directories:"
             ls -la /tmp/artifacts/ 2>/dev/null || echo "No artifacts directory found"
           fi
 
           echo "=== Reorganizing Java 17 artifacts ==="
           if [ -d "/tmp/artifacts/java17-artifacts" ]; then
-            # Find and copy all files with flexible path handling
             find /tmp/artifacts/java17-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_sdk_jars/ \; 2>/dev/null || echo "No SDK jars found"
             find /tmp/artifacts/java17-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_connector_jars/ \; 2>/dev/null || echo "No connector jars found"
             find /tmp/artifacts/java17-artifacts -type f -name "*.zip" -exec cp {} /tmp/java17_connector_zips/ \; 2>/dev/null || echo "No connector zips found"
@@ -193,21 +190,18 @@ jobs:
             echo "Java 17 connector zips: $(ls /tmp/java17_connector_zips/ 2>/dev/null | wc -l)"
           else
             echo "ERROR: java17-artifacts directory not found!"
-            echo "Available directories:"
             ls -la /tmp/artifacts/ 2>/dev/null || echo "No artifacts directory found"
           fi
 
       - name: Verify release branch and get commit SHA
         if: ${{ matrix.java-version == '17' }}
         run: |
-          # Ensure we're on the release branch and get the current commit SHA
           CURRENT_BRANCH=$(git branch --show-current)
           CURRENT_COMMIT=$(git rev-parse HEAD)
           echo "Current branch: $CURRENT_BRANCH"
           echo "Current commit: $CURRENT_COMMIT"
           echo "RELEASE_COMMIT_SHA=$CURRENT_COMMIT" >> $GITHUB_ENV
           
-          # Verify the release branch exists remotely
           if git ls-remote --heads origin release_${NEW_RELEASE_VERSION} | grep -q release_${NEW_RELEASE_VERSION}; then
             echo "Release branch exists remotely: release_${NEW_RELEASE_VERSION}"
             REMOTE_COMMIT=$(git ls-remote origin release_${NEW_RELEASE_VERSION} | cut -f1)
@@ -235,7 +229,6 @@ jobs:
           
           EOF
 
-          # Generate checksum tables for both Java versions and all artifact types
           for java_version in 11 17; do
             for artifact_type in "sdk_jars:Athena Federation SDK jars" "connector_jars:Athena Federation Connector Lambda jars" "connector_zips:Athena Federation Connector Lambda zips"; do
               dir_suffix=$(echo $artifact_type | cut -d: -f1)
@@ -257,9 +250,7 @@ jobs:
           
           **Full Changelog**: https://github.com/awslabs/aws-athena-query-federation/compare/v$PREVIOUS_RELEASE_VERSION..v$NEW_RELEASE_VERSION
           EOF
-          # ------------------------------------------------------------------------------------------
           
-          # Determine the best target for the release
           RELEASE_TARGET=""
           if [ -n "$REMOTE_RELEASE_COMMIT" ]; then
             RELEASE_TARGET="$REMOTE_RELEASE_COMMIT"
@@ -272,12 +263,12 @@ jobs:
             echo "Using release branch as target: $RELEASE_TARGET"
           fi
           
-          # Create the draft github release:
           gh release create "v$NEW_RELEASE_VERSION" -d --latest \
+            --repo "${{ github.repository }}" \
             --target "$RELEASE_TARGET" \
             -t "Release v$NEW_RELEASE_VERSION of Athena Query Federation" \
             --notes-file /tmp/RELEASE_NOTES
-          # Upload the jar attachments for both Java versions
+          
           echo "=== Final artifact counts before upload ==="
           echo "Java 11 SDK jars: $(find /tmp/java11_sdk_jars -type f 2>/dev/null | wc -l)"
           echo "Java 11 connector jars: $(find /tmp/java11_connector_jars -type f 2>/dev/null | wc -l)"
@@ -286,7 +277,6 @@ jobs:
           echo "Java 17 connector jars: $(find /tmp/java17_connector_jars -type f 2>/dev/null | wc -l)"
           echo "Java 17 connector zips: $(find /tmp/java17_connector_zips -type f 2>/dev/null | wc -l)"
           
-          # Collect all files to upload
           ALL_FILES=""
           for dir in /tmp/java11_sdk_jars /tmp/java11_connector_jars /tmp/java11_connector_zips /tmp/java17_sdk_jars /tmp/java17_connector_jars /tmp/java17_connector_zips; do
             if [ -d "$dir" ]; then
@@ -299,7 +289,7 @@ jobs:
           
           if [ -n "$ALL_FILES" ]; then
             echo "Uploading $(echo $ALL_FILES | wc -w) files..."
-            gh release upload "v$NEW_RELEASE_VERSION" $ALL_FILES --clobber
+            gh release upload "v$NEW_RELEASE_VERSION" $ALL_FILES --clobber --repo "${{ github.repository }}"
           else
             echo "ERROR: No files found to upload!"
             exit 1
