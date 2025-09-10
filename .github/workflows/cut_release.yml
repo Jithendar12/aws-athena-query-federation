@@ -225,8 +225,7 @@ jobs:
           # ------------------------------------------------------------------------------------------
           
           # Create the draft github release:
-          gh release create "v$NEW_RELEASE_VERSION" -d --latest \
-            --target release_${NEW_RELEASE_VERSION} \
+          gh release create "v$NEW_RELEASE_VERSION" -d \
             -t "Release v$NEW_RELEASE_VERSION of Athena Query Federation" \
             --notes-file /tmp/RELEASE_NOTES
           # Upload the jar attachments for both Java versions
