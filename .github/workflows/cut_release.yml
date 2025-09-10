@@ -45,6 +45,8 @@ jobs:
       matrix:
         java-version: ['11', '17']
     runs-on: ubuntu-latest
+    outputs:
+      release_commit_sha: ${{ steps.release_commit.outputs.release_commit_sha }}
     env:
       PREVIOUS_RELEASE_VERSION: ${{ needs.calculate_versions.outputs.previous_release_version }}
       NEW_RELEASE_VERSION: ${{ needs.calculate_versions.outputs.new_release_version }}
@@ -86,12 +88,18 @@ jobs:
 
       - name: Create the release bump commit
         if: ${{ matrix.java-version == '17' }}
+        id: release_commit
         run: |
           echo "Cut release $NEW_RELEASE_VERSION" > /tmp/RELEASE_MESSAGE
           echo >> /tmp/RELEASE_MESSAGE
           git fetch --tag origin
           git log --format='  - %s' v${PREVIOUS_RELEASE_VERSION}..HEAD >> /tmp/RELEASE_MESSAGE
           git commit -a -F /tmp/RELEASE_MESSAGE
+          
+          # Capture the commit SHA for the release
+          RELEASE_COMMIT_SHA=$(git rev-parse HEAD)
+          echo "release_commit_sha=$RELEASE_COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "Release commit SHA: $RELEASE_COMMIT_SHA"
 
       - name: Push the release branch (initial)
         if: ${{ matrix.java-version == '17' }}
@@ -150,11 +158,30 @@ jobs:
     env:
       PREVIOUS_RELEASE_VERSION: ${{ needs.calculate_versions.outputs.previous_release_version }}
       NEW_RELEASE_VERSION: ${{ needs.calculate_versions.outputs.new_release_version }}
+      RELEASE_COMMIT_SHA: ${{ needs.build.outputs.release_commit_sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Fetch release branch
+        run: |
+          # Fetch all branches to ensure we have the release branch
+          git fetch origin
+          
+          # Check if release branch exists and checkout if available
+          if git ls-remote --heads origin release_${NEW_RELEASE_VERSION} | grep -q release_${NEW_RELEASE_VERSION}; then
+            echo "Release branch found, checking out..."
+            git checkout release_${NEW_RELEASE_VERSION}
+          else
+            echo "Release branch not found, using commit SHA: $RELEASE_COMMIT_SHA"
+            if [ -n "$RELEASE_COMMIT_SHA" ]; then
+              git checkout $RELEASE_COMMIT_SHA
+            else
+              echo "Warning: No release commit SHA available, staying on current branch"
+            fi
+          fi
 
       - name: Download all Java artifacts
         uses: actions/download-artifact@v4
@@ -248,9 +275,22 @@ jobs:
           **Full Changelog**: https://github.com/awslabs/aws-athena-query-federation/compare/v$PREVIOUS_RELEASE_VERSION..v$NEW_RELEASE_VERSION
           EOF
           
+          # Determine the target for the release
+          RELEASE_TARGET=""
+          if [ -n "$RELEASE_COMMIT_SHA" ]; then
+            RELEASE_TARGET="$RELEASE_COMMIT_SHA"
+            echo "Using release commit SHA as target: $RELEASE_COMMIT_SHA"
+          elif git ls-remote --heads origin release_${NEW_RELEASE_VERSION} | grep -q release_${NEW_RELEASE_VERSION}; then
+            RELEASE_TARGET="release_${NEW_RELEASE_VERSION}"
+            echo "Using release branch as target: $RELEASE_TARGET"
+          else
+            RELEASE_TARGET="master"
+            echo "Falling back to master branch as target"
+          fi
+          
           # Create the draft github release:
           gh release create "v$NEW_RELEASE_VERSION" -d --latest \
-            --target release_${NEW_RELEASE_VERSION} \
+            --target "$RELEASE_TARGET" \
             -t "Release v$NEW_RELEASE_VERSION of Athena Query Federation" \
             --notes-file /tmp/RELEASE_NOTES
             
