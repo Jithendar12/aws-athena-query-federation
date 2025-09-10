@@ -129,8 +129,8 @@ jobs:
           echo "Waiting for both Java 11 and Java 17 artifacts to be uploaded..."
           for i in {1..60}; do
             # Check if both artifacts exist
-            JAVA11_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java11-artifacts") | .name' --repo "${{ github.repository }}" | wc -l)
-            JAVA17_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java17-artifacts") | .name' --repo "${{ github.repository }}" | wc -l)
+            JAVA11_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java11-artifacts") | .name' | wc -l)
+            JAVA17_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java17-artifacts") | .name' | wc -l)
           
             echo "Attempt $i: Java 11 artifacts: $JAVA11_COUNT, Java 17 artifacts: $JAVA17_COUNT"
           
@@ -263,11 +263,10 @@ jobs:
             echo "Using release branch as target: $RELEASE_TARGET"
           fi
           
-          gh release create "v$NEW_RELEASE_VERSION" -d --latest \
-            --repo "${{ github.repository }}" \
-            --target "$RELEASE_TARGET" \
-            -t "Release v$NEW_RELEASE_VERSION of Athena Query Federation" \
-            --notes-file /tmp/RELEASE_NOTES
+                      gh release create "v$NEW_RELEASE_VERSION" --repo "${{ github.repository }}" -d --latest \
+              --target "$RELEASE_TARGET" \
+              -t "Release v$NEW_RELEASE_VERSION of Athena Query Federation" \
+              --notes-file /tmp/RELEASE_NOTES
           
           echo "=== Final artifact counts before upload ==="
           echo "Java 11 SDK jars: $(find /tmp/java11_sdk_jars -type f 2>/dev/null | wc -l)"
@@ -289,7 +288,7 @@ jobs:
           
           if [ -n "$ALL_FILES" ]; then
             echo "Uploading $(echo $ALL_FILES | wc -w) files..."
-            gh release upload "v$NEW_RELEASE_VERSION" $ALL_FILES --clobber --repo "${{ github.repository }}"
+                          gh release upload "v$NEW_RELEASE_VERSION" --repo "${{ github.repository }}" $ALL_FILES --clobber
           else
             echo "ERROR: No files found to upload!"
             exit 1
