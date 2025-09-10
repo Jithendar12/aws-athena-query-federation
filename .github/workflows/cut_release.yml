@@ -121,6 +121,32 @@ jobs:
             /tmp/java${{ matrix.java-version }}_connector_jars/
             /tmp/java${{ matrix.java-version }}_connector_zips/
 
+      - name: Wait for all artifacts to be uploaded
+        if: ${{ matrix.java-version == '17' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Waiting for both Java 11 and Java 17 artifacts to be uploaded..."
+          for i in {1..60}; do
+            # Check if both artifacts exist
+            JAVA11_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java11-artifacts") | .name' | wc -l)
+            JAVA17_COUNT=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | select(.name == "java17-artifacts") | .name' | wc -l)
+            
+            echo "Attempt $i: Java 11 artifacts: $JAVA11_COUNT, Java 17 artifacts: $JAVA17_COUNT"
+            
+            if [ "$JAVA11_COUNT" -eq "1" ] && [ "$JAVA17_COUNT" -eq "1" ]; then
+              echo "Both artifacts are now available!"
+              break
+            else
+              echo "Waiting for artifacts... (${i}/60)"
+              sleep 10
+            fi
+            
+            if [ "$i" -eq "60" ]; then
+              echo "Timeout waiting for artifacts. Proceeding anyway..."
+            fi
+          done
+
       - name: Download all Java artifacts
         if: ${{ matrix.java-version == '17' }}
         uses: actions/download-artifact@v4
