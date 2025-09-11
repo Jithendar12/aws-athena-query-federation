@@ -253,17 +253,17 @@ jobs:
                 # Try to upload with clobber for existing files
                 if gh release upload "v$NEW_RELEASE_VERSION" "$file" --clobber 2>/dev/null; then
                   echo "✅ Replaced: $filename"
-                  ((UPLOADED_COUNT++))
+                  UPLOADED_COUNT=$((UPLOADED_COUNT + 1))
                 else
                   echo "Failed to replace $filename, but it already exists - skipping"
-                  ((SKIPPED_COUNT++))
+                  SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
                 fi
               else
                 echo "Uploading new asset: $filename"
                 # Try to upload new file
                 if gh release upload "v$NEW_RELEASE_VERSION" "$file" 2>/dev/null; then
                   echo "Uploaded: $filename"
-                  ((UPLOADED_COUNT++))
+                  UPLOADED_COUNT=$((UPLOADED_COUNT + 1))
                 else
                   echo "❌ Failed to upload: $filename"
                   UPLOAD_SUCCESS=false
