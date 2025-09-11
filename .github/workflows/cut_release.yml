@@ -33,19 +33,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: echo "PREVIOUS_RELEASE_VERSION=$(gh release list --exclude-drafts --exclude-pre-releases -L 1 | sed 's/.*\s\+Latest\s\+v\(.*\)\s\+.*/\1/g')" >> $GITHUB_ENV
-
       - name: Setup previous release version tag environment variable
         run: echo "PREVIOUS_RELEASE_TAG=v$PREVIOUS_RELEASE_VERSION" >> $GITHUB_ENV
-
       - name: Setup new release version environment variable
         run: |
           NEW_RELEASE_VERSION=$((echo $PREVIOUS_RELEASE_VERSION | grep "$(date +'%Y.%-U')" || date +'%Y.%-U.0') | python3 -c 'version = input().split("."); print(f"{version[0]}.{version[1]}.{int(version[2]) + 1}")')
           echo "NEW_RELEASE_VERSION=$NEW_RELEASE_VERSION" >> $GITHUB_ENV
-
       - name: Create branch locally on the runner
         if: ${{ matrix.java-version == '17' }}
         run: git checkout -b release_${NEW_RELEASE_VERSION} origin/master
-
       - name: Bump the versions in the branch
         if: ${{ matrix.java-version == '17' }}
         env:
@@ -53,14 +49,11 @@ jobs:
         run: |
           python3 tools/bump_versions/bump_sdk_version.py
           python3 tools/bump_versions/bump_connectors_version.py
-
-      # See: https://joht.github.io/johtizen/build/2022/01/20/github-actions-push-into-repository.html
       - name: Setup workflow git committer user
         if: ${{ matrix.java-version == '17' }}
         run: |
           git config --global user.name "athena_federation_cut_release_workflow"
           git config --global user.email "athena_federation_cut_release_workflow@users.noreply.github.com"
-
       - name: Create the release bump commit
         if: ${{ matrix.java-version == '17' }}
         run: |
@@ -69,15 +62,11 @@ jobs:
           git fetch --tag origin
           git log --format='  - %s' $PREVIOUS_RELEASE_TAG..HEAD >> /tmp/RELEASE_MESSAGE
           git commit -a -F /tmp/RELEASE_MESSAGE
-
       - name: Push the release branch (initial)
         if: ${{ matrix.java-version == '17' }}
         run: |
-          # Delete the remote branch if it already exists
           git push origin --delete release_${NEW_RELEASE_VERSION} 2>/dev/null || echo "Branch doesn't exist, continuing..."
-          # Push the new branch
           git push origin release_${NEW_RELEASE_VERSION}:release_${NEW_RELEASE_VERSION}
-
       - name: Wait and checkout release branch (Java 11)
         if: ${{ matrix.java-version == '11' }}
         run: |
@@ -92,24 +81,16 @@ jobs:
               sleep 10
             fi
           done
-
       - name: Build Java ${{ matrix.java-version }} jars
         run: |
           mvn clean package -T 1C -DskipTests -Dorg.slf4j.simpleLogger.defaultLogLevel=WARN --no-transfer-progress
-
-          # Copy over the sdk jars
           mkdir -p /tmp/java${{ matrix.java-version }}_sdk_jars/
           cp ./athena-federation-sdk/target/aws-athena-federation-sdk-${NEW_RELEASE_VERSION}.jar /tmp/java${{ matrix.java-version }}_sdk_jars/
           cp ./athena-federation-sdk/target/aws-athena-federation-sdk-${NEW_RELEASE_VERSION}-withdep.jar /tmp/java${{ matrix.java-version }}_sdk_jars/
-
-          # Copy over the connector jars
           mkdir -p /tmp/java${{ matrix.java-version }}_connector_jars/
           find athena-*/target -name "*.jar" -type f | grep -v "test" | grep -v "arrow" | grep -v "/original" | grep -v "example" | grep -v "\-sdk-" | grep -v "\-dsv2/" | grep -v "athena-jdbc" | xargs -I{} cp {} /tmp/java${{ matrix.java-version }}_connector_jars/
-
-          # Copy over the connector zips
           mkdir -p /tmp/java${{ matrix.java-version }}_connector_zips/
           find athena-*/target/ -name "*.zip" -type f | grep -v "test" | grep -v "arrow" | grep -v "/original" | grep -v "example" | grep -v "\-sdk-" | grep -v "\-dsv2/" | xargs -I{} cp {} /tmp/java${{ matrix.java-version }}_connector_zips/
-
       - name: Upload Java ${{ matrix.java-version }} artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -118,26 +99,24 @@ jobs:
             /tmp/java${{ matrix.java-version }}_sdk_jars/
             /tmp/java${{ matrix.java-version }}_connector_jars/
             /tmp/java${{ matrix.java-version }}_connector_zips/
-
+      # --- NEW STEP to wait for Java 11 artifacts before download ---
       - name: Wait for Java 11 artifacts
         if: ${{ matrix.java-version == '17' }}
         run: |
           for i in {1..30}; do
-            echo "Checking if Java 11 artifacts are available... ($i/30)"
-            if gh run view ${{ github.run_id }} --json artifacts --jq '.artifacts[].name' | grep -q "java11-artifacts"; then
+            if gh api repos/${{ github.repository }}/actions/artifacts --paginate --jq '.artifacts[].name' | grep -q "java11-artifacts"; then
               echo "Java 11 artifacts found!"
               break
+            else
+              echo "Waiting for Java 11 artifacts... ($i/30)"
+              sleep 10
             fi
-            echo "Java 11 artifacts not ready yet, waiting 10s..."
-            sleep 10
           done
-
       - name: Download all Java artifacts
         if: ${{ matrix.java-version == '17' }}
         uses: actions/download-artifact@v4
         with:
           path: /tmp/artifacts
-
       - name: Debug downloaded artifacts
         if: ${{ matrix.java-version == '17' }}
         run: |
@@ -145,43 +124,29 @@ jobs:
           find /tmp/artifacts -type f | head -20
           echo "=== Directories ==="
           find /tmp/artifacts -type d
-
       - name: Reorganize downloaded artifacts
         if: ${{ matrix.java-version == '17' }}
         run: |
           mkdir -p /tmp/java11_sdk_jars /tmp/java11_connector_jars /tmp/java11_connector_zips
           mkdir -p /tmp/java17_sdk_jars /tmp/java17_connector_jars /tmp/java17_connector_zips
-
           echo "=== Reorganizing Java 11 artifacts ==="
           if [ -d "/tmp/artifacts/java11-artifacts" ]; then
-            # Find and copy all files with flexible path handling
-            find /tmp/artifacts/java11-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_sdk_jars/ \; 2>/dev/null || echo "No SDK jars found"
-            find /tmp/artifacts/java11-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_connector_jars/ \; 2>/dev/null || echo "No connector jars found"
-            find /tmp/artifacts/java11-artifacts -type f -name "*.zip" -exec cp {} /tmp/java11_connector_zips/ \; 2>/dev/null || echo "No connector zips found"
-            echo "Java 11 SDK jars: $(ls /tmp/java11_sdk_jars/ 2>/dev/null | wc -l)"
-            echo "Java 11 connector jars: $(ls /tmp/java11_connector_jars/ 2>/dev/null | wc -l)"
-            echo "Java 11 connector zips: $(ls /tmp/java11_connector_zips/ 2>/dev/null | wc -l)"
-          else
-            echo "ERROR: java11-artifacts directory not found!"
-            echo "Available directories:"
-            ls -la /tmp/artifacts/ 2>/dev/null || echo "No artifacts directory found"
+            find /tmp/artifacts/java11-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_sdk_jars/ \; 2>/dev/null || true
+            find /tmp/artifacts/java11-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java11_connector_jars/ \; 2>/dev/null || true
+            find /tmp/artifacts/java11-artifacts -type f -name "*.zip" -exec cp {} /tmp/java11_connector_zips/ \; 2>/dev/null || true
           fi
-
           echo "=== Reorganizing Java 17 artifacts ==="
           if [ -d "/tmp/artifacts/java17-artifacts" ]; then
-            # Find and copy all files with flexible path handling
-            find /tmp/artifacts/java17-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_sdk_jars/ \; 2>/dev/null || echo "No SDK jars found"
-            find /tmp/artifacts/java17-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_connector_jars/ \; 2>/dev/null || echo "No connector jars found"
-            find /tmp/artifacts/java17-artifacts -type f -name "*.zip" -exec cp {} /tmp/java17_connector_zips/ \; 2>/dev/null || echo "No connector zips found"
-            echo "Java 17 SDK jars: $(ls /tmp/java17_sdk_jars/ 2>/dev/null | wc -l)"
-            echo "Java 17 connector jars: $(ls /tmp/java17_connector_jars/ 2>/dev/null | wc -l)"
-            echo "Java 17 connector zips: $(ls /tmp/java17_connector_zips/ 2>/dev/null | wc -l)"
-          else
-            echo "ERROR: java17-artifacts directory not found!"
-            echo "Available directories:"
-            ls -la /tmp/artifacts/ 2>/dev/null || echo "No artifacts directory found"
+            find /tmp/artifacts/java17-artifacts -type f -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_sdk_jars/ \; 2>/dev/null || true
+            find /tmp/artifacts/java17-artifacts -type f -name "*.jar" ! -name "aws-athena-federation-sdk-*.jar" -exec cp {} /tmp/java17_connector_jars/ \; 2>/dev/null || true
+            find /tmp/artifacts/java17-artifacts -type f -name "*.zip" -exec cp {} /tmp/java17_connector_zips/ \; 2>/dev/null || true
           fi
-
+      # --- EXTRA FETCH STEP before release creation ---
+      - name: Ensure release branch exists locally
+        if: ${{ matrix.java-version == '17' }}
+        run: |
+          git fetch origin release_${NEW_RELEASE_VERSION}
+          git checkout release_${NEW_RELEASE_VERSION}
       - name: Create the release on github
         if: ${{ matrix.java-version == '17' }}
         env:
@@ -222,29 +187,22 @@ jobs:
           
           **Full Changelog**: https://github.com/awslabs/aws-athena-query-federation/compare/v$PREVIOUS_RELEASE_VERSION..v$NEW_RELEASE_VERSION
           EOF
-          # ------------------------------------------------------------------------------------------
-          
-          # Create the draft github release:
-          gh release create "v$NEW_RELEASE_VERSION" -d \
+          gh release create "v$NEW_RELEASE_VERSION" -d --latest \
+            --target release_${NEW_RELEASE_VERSION} \
             -t "Release v$NEW_RELEASE_VERSION of Athena Query Federation" \
             --notes-file /tmp/RELEASE_NOTES
-          # Upload the jar attachments for both Java versions
           echo "=== Final artifact counts before upload ==="
-          echo "Java 11 SDK jars: $(find /tmp/java11_sdk_jars -type f 2>/dev/null | wc -l)"
-          echo "Java 11 connector jars: $(find /tmp/java11_connector_jars -type f 2>/dev/null | wc -l)"
-          echo "Java 11 connector zips: $(find /tmp/java11_connector_zips -type f 2>/dev/null | wc -l)"
-          echo "Java 17 SDK jars: $(find /tmp/java17_sdk_jars -type f 2>/dev/null | wc -l)"
-          echo "Java 17 connector jars: $(find /tmp/java17_connector_jars -type f 2>/dev/null | wc -l)"
-          echo "Java 17 connector zips: $(find /tmp/java17_connector_zips -type f 2>/dev/null | wc -l)"
-          
-          # Collect all files to upload
+          echo "Java 11 SDK jars: $(find /tmp/java11_sdk_jars -type f | wc -l)"
+          echo "Java 11 connector jars: $(find /tmp/java11_connector_jars -type f | wc -l)"
+          echo "Java 11 connector zips: $(find /tmp/java11_connector_zips -type f | wc -l)"
+          echo "Java 17 SDK jars: $(find /tmp/java17_sdk_jars -type f | wc -l)"
+          echo "Java 17 connector jars: $(find /tmp/java17_connector_jars -type f | wc -l)"
+          echo "Java 17 connector zips: $(find /tmp/java17_connector_zips -type f | wc -l)"
           ALL_FILES=""
           for dir in /tmp/java11_sdk_jars /tmp/java11_connector_jars /tmp/java11_connector_zips /tmp/java17_sdk_jars /tmp/java17_connector_jars /tmp/java17_connector_zips; do
-            if [ -d "$dir" ]; then
-              FILES=$(find "$dir" -type f 2>/dev/null || true)
-              if [ -n "$FILES" ]; then
-                ALL_FILES="$ALL_FILES $FILES"
-              fi
+            FILES=$(find "$dir" -type f || true)
+            if [ -n "$FILES" ]; then
+              ALL_FILES="$ALL_FILES $FILES"
             fi
           done
           
