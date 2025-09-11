@@ -235,28 +235,52 @@ jobs:
           echo "Total files: $(echo $ALL_FILES | wc -w)"
           
           if [ -n "$ALL_FILES" ]; then
-            # Upload with retry logic and better error handling
-            UPLOAD_SUCCESS=false
-            for attempt in 1 2 3; do
-              echo "Upload attempt $attempt of 3..."
-              if gh release upload "v$NEW_RELEASE_VERSION" $ALL_FILES --clobber; then
-                UPLOAD_SUCCESS=true
-                echo "Upload successful on attempt $attempt"
-                break
+            # Get list of existing assets to avoid conflicts
+            echo "Checking existing assets..."
+            EXISTING_ASSETS=$(gh release view "v$NEW_RELEASE_VERSION" --json assets --jq '.assets[].name' 2>/dev/null || echo "")
+            
+            # Upload files one by one to handle conflicts better
+            UPLOAD_SUCCESS=true
+            UPLOADED_COUNT=0
+            SKIPPED_COUNT=0
+            
+            for file in $ALL_FILES; do
+              filename=$(basename "$file")
+              
+              # Check if asset already exists
+              if echo "$EXISTING_ASSETS" | grep -q "^${filename}$"; then
+                echo "Asset $filename already exists, attempting to replace..."
+                # Try to upload with clobber for existing files
+                if gh release upload "v$NEW_RELEASE_VERSION" "$file" --clobber 2>/dev/null; then
+                  echo "✅ Replaced: $filename"
+                  ((UPLOADED_COUNT++))
+                else
+                  echo "Failed to replace $filename, but it already exists - skipping"
+                  ((SKIPPED_COUNT++))
+                fi
               else
-                echo "Upload attempt $attempt failed"
-                if [ $attempt -lt 3 ]; then
-                  echo "Retrying in 15 seconds..."
-                  sleep 15
+                echo "Uploading new asset: $filename"
+                # Try to upload new file
+                if gh release upload "v$NEW_RELEASE_VERSION" "$file" 2>/dev/null; then
+                  echo "Uploaded: $filename"
+                  ((UPLOADED_COUNT++))
+                else
+                  echo "❌ Failed to upload: $filename"
+                  UPLOAD_SUCCESS=false
                 fi
               fi
             done
             
+            echo "=== Upload Summary ==="
+            echo "Successfully uploaded/replaced: $UPLOADED_COUNT"
+            echo "Skipped (already existed): $SKIPPED_COUNT"
+            echo "Total files processed: $(echo $ALL_FILES | wc -w)"
+            
             if [ "$UPLOAD_SUCCESS" = false ]; then
-              echo "ERROR: All upload attempts failed!"
-              echo "Trying to debug the release state..."
-              gh release view "v$NEW_RELEASE_VERSION" || echo "Cannot view release"
+              echo "ERROR: Some uploads failed!"
               exit 1
+            else
+              echo "Upload process completed successfully!"
             fi
           else
             echo "ERROR: No files found to upload!"
