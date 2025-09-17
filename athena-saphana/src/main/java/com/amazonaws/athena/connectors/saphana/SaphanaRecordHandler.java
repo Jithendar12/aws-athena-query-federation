@@ -22,6 +22,7 @@
 package com.amazonaws.athena.connectors.saphana;
 
 import com.amazonaws.athena.connector.credentials.CredentialsProvider;
+import com.amazonaws.athena.connector.credentials.CredentialsProviderFactory;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
@@ -35,7 +36,6 @@ import com.amazonaws.athena.connectors.jdbc.manager.JdbcSplitQueryBuilder;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Validate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -118,11 +118,10 @@ public class SaphanaRecordHandler extends JdbcRecordHandler
     @Override
     protected CredentialsProvider getCredentialProvider()
     {
-        final String secretName = getDatabaseConnectionConfig().getSecret();
-        if (StringUtils.isNotBlank(secretName)) {
-            return new SaphanaCredentialsProvider(secretName);
-        }
-
-        return null;
+        return CredentialsProviderFactory.createCredentialProvider(
+                getDatabaseConnectionConfig().getSecret(),
+                getCachableSecretsManager(),
+                new SaphanaOAuthCredentialsProvider()
+        );
     }
 }
