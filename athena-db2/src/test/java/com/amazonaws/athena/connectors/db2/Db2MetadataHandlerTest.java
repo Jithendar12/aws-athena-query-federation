@@ -73,6 +73,7 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -143,7 +144,8 @@ public class Db2MetadataHandlerTest extends TestBase
     public void doGetSplitsWithNoPartition()
             throws Exception
     {
-        Constraints constraints = Mockito.mock(Constraints.class);
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
+                Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
         TableName tableName = new TableName("testSchema", "testTable");
 
         Schema schema = this.db2MetadataHandler.getPartitionSchema("testCatalogName");
@@ -172,7 +174,8 @@ public class Db2MetadataHandlerTest extends TestBase
     public void doGetSplits()
             throws Exception
     {
-        Constraints constraints = Mockito.mock(Constraints.class);
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
+                Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
         TableName tableName = new TableName("testSchema", "testTable");
 
         PreparedStatement partitionPreparedStatement = Mockito.mock(PreparedStatement.class);
@@ -223,8 +226,10 @@ public class Db2MetadataHandlerTest extends TestBase
                 .map(Field::getName)
                 .collect(Collectors.toSet());
 
-        Constraints constraints = Mockito.mock(Constraints.class);
-        Mockito.when(constraints.isQueryPassThrough()).thenReturn(true);
+        Map<String, String> queryPassthroughArgs = new HashMap<>();
+        queryPassthroughArgs.put("query", "SELECT * FROM test");
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
+                Constraints.DEFAULT_NO_LIMIT, queryPassthroughArgs, null);
 
         Block partitions = Mockito.mock(Block.class);
 

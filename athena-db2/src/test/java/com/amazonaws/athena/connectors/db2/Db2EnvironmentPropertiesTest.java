@@ -33,6 +33,7 @@ import static com.amazonaws.athena.connector.lambda.connection.EnvironmentConsta
 import static com.amazonaws.athena.connector.lambda.connection.EnvironmentConstants.PORT;
 import static com.amazonaws.athena.connector.lambda.connection.EnvironmentConstants.SECRET_NAME;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 @RunWith(MockitoJUnitRunner.class)
 public class Db2EnvironmentPropertiesTest
@@ -76,5 +77,22 @@ public class Db2EnvironmentPropertiesTest
     public void testGetDelimiter()
     {
         assertEquals(";", db2Properties.getDelimiter());
+    }
+
+    @Test
+    public void testDb2EmptyConnectionProperties() {
+        connectionProperties.put(HOST, "");
+        connectionProperties.put(DATABASE, "");
+        connectionProperties.put(SECRET_NAME, "");
+        connectionProperties.put(PORT, "");
+        Map<String, String> result = db2Properties.connectionPropertiesToEnvironment(connectionProperties);
+        String expectedConnectionString = "dbtwo://jdbc:db2://:/:${}";
+        assertEquals(expectedConnectionString, result.get(DEFAULT));
+        assertNotNull(result);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testDb2NullConnectionProperties() {
+        db2Properties.connectionPropertiesToEnvironment(null);
     }
 }
