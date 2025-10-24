@@ -84,7 +84,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.UUID;
 
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
@@ -229,6 +228,69 @@ public class DocDBRecordHandlerTest
         logger.info("{}: exit ", testName.getMethodName());
     }
 
+    /**
+     * Helper method to create a standard S3SpillLocation for tests
+     */
+    private S3SpillLocation createTestSpillLocation()
+    {
+        return S3SpillLocation.newBuilder()
+                .withBucket(UUID.randomUUID().toString())
+                .withSplitId(UUID.randomUUID().toString())
+                .withQueryId(UUID.randomUUID().toString())
+                .withIsDirectory(true)
+                .build();
+    }
+
+    /**
+     * Helper method to create a standard Split for tests
+     */
+    private Split createTestSplit(S3SpillLocation splitLoc)
+    {
+        return Split.newBuilder(splitLoc, keyFactory.create())
+                .add(DOCDB_CONN_STR, CONNECTION_STRING)
+                .build();
+    }
+
+    /**
+     * Helper method to set up standard mock collection behavior
+     */
+    private void setupMockCollection(List<Document> documents)
+    {
+        when(mockCollection.find(nullable(Document.class))).thenReturn(mockIterable);
+        when(mockIterable.projection(nullable(Document.class))).thenReturn(mockIterable);
+        when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
+        when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+    }
+
+    /**
+     * Helper method to create a standard ReadRecordsRequest
+     */
+    private ReadRecordsRequest createReadRecordsRequest(Schema schema, Constraints constraints)
+    {
+        S3SpillLocation splitLoc = createTestSpillLocation();
+        Split split = createTestSplit(splitLoc);
+        
+        return new ReadRecordsRequest(
+                IDENTITY,
+                DEFAULT_CATALOG,
+                "queryId-" + System.currentTimeMillis(),
+                TABLE_NAME,
+                schema,
+                split,
+                constraints,
+                100_000_000_000L,
+                100_000_000_000L
+        );
+    }
+
+    /**
+     * Helper method to create standard constraints with empty maps
+     */
+    private Constraints createEmptyConstraints()
+    {
+        return new Constraints(new HashMap<>(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+    }
+
     @Test
     public void doReadRecordsNoSpill()
             throws Exception
@@ -264,19 +326,15 @@ public class DocDBRecordHandlerTest
         constraintsMap.put("col3", SortedRangeSet.copyOf(Types.MinorType.FLOAT8.getType(),
                 ImmutableList.of(Range.equal(allocator, Types.MinorType.FLOAT8.getType(), 22.0D)), false));
 
-        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
-                .withBucket(UUID.randomUUID().toString())
-                .withSplitId(UUID.randomUUID().toString())
-                .withQueryId(UUID.randomUUID().toString())
-                .withIsDirectory(true)
-                .build();
+        S3SpillLocation splitLoc = createTestSpillLocation();
+        Split split = createTestSplit(splitLoc);
 
         ReadRecordsRequest request = new ReadRecordsRequest(IDENTITY,
                 DEFAULT_CATALOG,
                 "queryId-" + System.currentTimeMillis(),
                 TABLE_NAME,
                 schemaForRead,
-                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                split,
                 new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
                 100_000_000_000L, //100GB don't expect this to spill
                 100_000_000_000L
@@ -318,19 +376,15 @@ public class DocDBRecordHandlerTest
         constraintsMap.put("col3", SortedRangeSet.copyOf(Types.MinorType.FLOAT8.getType(),
                 ImmutableList.of(Range.greaterThan(allocator, Types.MinorType.FLOAT8.getType(), -10000D)), false));
 
-        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
-                .withBucket(UUID.randomUUID().toString())
-                .withSplitId(UUID.randomUUID().toString())
-                .withQueryId(UUID.randomUUID().toString())
-                .withIsDirectory(true)
-                .build();
+        S3SpillLocation splitLoc = createTestSpillLocation();
+        Split split = createTestSplit(splitLoc);
 
         ReadRecordsRequest request = new ReadRecordsRequest(IDENTITY,
                 DEFAULT_CATALOG,
                 "queryId-" + System.currentTimeMillis(),
                 TABLE_NAME,
                 schemaForRead,
-                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                split,
                 new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
                 1_500_000L, //~1.5MB so we should see some spill
                 0L
@@ -418,19 +472,15 @@ public class DocDBRecordHandlerTest
 
 
         Map<String, ValueSet> constraintsMap = new HashMap<>();
-        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
-                .withBucket(UUID.randomUUID().toString())
-                .withSplitId(UUID.randomUUID().toString())
-                .withQueryId(UUID.randomUUID().toString())
-                .withIsDirectory(true)
-                .build();
+        S3SpillLocation splitLoc = createTestSpillLocation();
+        Split split = createTestSplit(splitLoc);
 
         ReadRecordsRequest request = new ReadRecordsRequest(IDENTITY,
                 DEFAULT_CATALOG,
                 "queryId-" + System.currentTimeMillis(),
                 TABLE_NAME,
                 res.getSchema(),
-                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                split,
                 new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
                 100_000_000_000L, //100GB don't expect this to spill
                 100_000_000_000L
@@ -490,19 +540,15 @@ public class DocDBRecordHandlerTest
 
 
         Map<String, ValueSet> constraintsMap = new HashMap<>();
-        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
-                .withBucket(UUID.randomUUID().toString())
-                .withSplitId(UUID.randomUUID().toString())
-                .withQueryId(UUID.randomUUID().toString())
-                .withIsDirectory(true)
-                .build();
+        S3SpillLocation splitLoc = createTestSpillLocation();
+        Split split = createTestSplit(splitLoc);
 
         ReadRecordsRequest request = new ReadRecordsRequest(IDENTITY,
                 DEFAULT_CATALOG,
                 "queryId-" + System.currentTimeMillis(),
                 TABLE_NAME,
                 res.getSchema(),
-                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                split,
                 new Constraints(constraintsMap,Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
                 100_000_000_000L, //100GB don't expect this to spill
                 100_000_000_000L
@@ -560,12 +606,8 @@ public class DocDBRecordHandlerTest
         qptParams.put("FILTER", "{\"title\": \"Bill of Rights\"}");
         qptParams.put(ENABLE_QUERY_PASSTHROUGH, "true");
 
-        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
-                .withBucket(UUID.randomUUID().toString())
-                .withSplitId(UUID.randomUUID().toString())
-                .withQueryId(UUID.randomUUID().toString())
-                .withIsDirectory(true)
-                .build();
+        S3SpillLocation splitLoc = createTestSpillLocation();
+        Split split = createTestSplit(splitLoc);
 
         // Create read request with query passthrough
         ReadRecordsRequest request = new ReadRecordsRequest(
@@ -574,7 +616,7 @@ public class DocDBRecordHandlerTest
                 "queryId-" + System.currentTimeMillis(),
                 new TableName(EXAMPLE_DATABASE, TPCDS_COLLECTION),
                 qptSchema,
-                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
+                split,
                 new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, qptParams, null),
                 100_000_000_000L,
                 100_000_000_000L
@@ -606,6 +648,132 @@ public class DocDBRecordHandlerTest
     }
 
     @Test
+    public void testDoReadRecords_withPassthroughDisabled()
+            throws Exception
+    {
+        // Create handler with query passthrough disabled
+        DocDBRecordHandler passthroughDisabledHandler = new DocDBRecordHandler(
+                amazonS3,
+                mockSecretsManager,
+                mockAthena,
+                connectionFactory,
+                com.google.common.collect.ImmutableMap.of(ENABLE_QUERY_PASSTHROUGH, "false")
+        );
+
+        List<Document> documents = new ArrayList<>();
+        Document doc = new Document();
+        documents.add(doc);
+        doc.put("col1", 42);
+        doc.put("col2", "testValue");
+
+        Schema schema = SchemaBuilder.newBuilder()
+                .addField("col1", Types.MinorType.INT.getType())
+                .addField("col2", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        setupMockCollection(documents);
+
+        // Create constraints WITHOUT query passthrough arguments
+        Map<String, ValueSet> constraintsMap = new HashMap<>();
+        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        ReadRecordsRequest request = createReadRecordsRequest(schema, constraints);
+
+        RecordResponse rawResponse = passthroughDisabledHandler.doReadRecords(allocator, request);
+
+        assertTrue("Response should be of type ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+        assertEquals(1, response.getRecordCount());
+
+        // Verify that the normal (non-passthrough) path was used
+        verify(mockClient).getDatabase(DEFAULT_SCHEMA);
+        verify(mockDatabase).getCollection(TEST_TABLE);
+    }
+
+    @Test
+    public void testDoReadRecords_withMissingQueryPassthroughArguments()
+    {
+        Schema schema = SchemaBuilder.newBuilder()
+                .addField("title", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        // Setup query passthrough parameters with missing required arguments
+        Map<String, ValueSet> constraintsMap = new HashMap<>();
+        Map<String, String> qptParams = new HashMap<>();
+        qptParams.put("schemaFunctionName", SYSTEM_QUERY);
+        qptParams.put(ENABLE_QUERY_PASSTHROUGH, "true");
+        // Missing DATABASE, COLLECTION, and FILTER parameters
+        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, qptParams, null);
+
+        ReadRecordsRequest request = createReadRecordsRequest(schema, constraints);
+
+        // Missing query passthrough arguments should throw RuntimeException
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> handler.doReadRecords(allocator, request));
+        assertTrue("Exception message should contain Missing Query Passthrough Argument",
+                exception.getMessage().contains("Missing Query Passthrough Argument"));
+    }
+
+    @Test
+    public void testDoReadRecords_withWrongSchemaFunctionName()
+    {
+        Schema schema = SchemaBuilder.newBuilder()
+                .addField("title", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        // Setup query passthrough parameters with wrong schema function name
+        Map<String, ValueSet> constraintsMap = new HashMap<>();
+        Map<String, String> qptParams = new HashMap<>();
+        qptParams.put("schemaFunctionName", "wrong.function");  // Wrong schema function name
+        qptParams.put(ENABLE_QUERY_PASSTHROUGH, "true");
+        qptParams.put("DATABASE", EXAMPLE_DATABASE);
+        qptParams.put("COLLECTION", TPCDS_COLLECTION);
+        qptParams.put("FILTER", "{\"title\": \"Bill of Rights\"}");
+        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, qptParams, null);
+
+        ReadRecordsRequest request = createReadRecordsRequest(schema, constraints);
+
+        // Wrong schema function name should throw RuntimeException
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> handler.doReadRecords(allocator, request));
+        assertTrue("Exception message should contain Function Signature doesn't match implementation's",
+                exception.getMessage().contains("Function Signature doesn't match implementation's"));
+    }
+
+    @Test
+    public void testDoReadRecords_withInvalidPassthroughFlag()
+            throws Exception
+    {
+        List<Document> documents = new ArrayList<>();
+        Document doc = new Document();
+        documents.add(doc);
+        doc.put("title", "Bill of Rights");
+
+        Schema schema = SchemaBuilder.newBuilder()
+                .addField("title", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        setupMockCollection(documents);
+
+        // Setup constraints WITHOUT query passthrough arguments (empty map)
+        // This simulates the case where passthrough is disabled at the engine level
+        Map<String, ValueSet> constraintsMap = new HashMap<>();
+        Map<String, String> emptyQptParams = new HashMap<>();  // Empty passthrough arguments
+        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, emptyQptParams, null);
+
+        ReadRecordsRequest request = createReadRecordsRequest(schema, constraints);
+
+        // With empty passthrough arguments, should use normal path (not passthrough)
+        RecordResponse rawResponse = handler.doReadRecords(allocator, request);
+
+        assertTrue("Response should be of type ReadRecordsResponse", rawResponse instanceof ReadRecordsResponse);
+        ReadRecordsResponse response = (ReadRecordsResponse) rawResponse;
+        assertEquals(1, response.getRecordCount());
+
+        // Verify that the normal (non-passthrough) path was used
+        verify(mockClient).getDatabase(DEFAULT_SCHEMA);
+        verify(mockDatabase).getCollection(TEST_TABLE);
+    }
+
+    @Test
     public void testDoReadRecords_withCaseInsensitivity()
             throws Exception
     {
@@ -632,33 +800,9 @@ public class DocDBRecordHandlerTest
                 .addFloat8Field("LOWERCASE_FIELD")  // uppercase schema field name
                 .build();
 
-        when(mockCollection.find(nullable(Document.class))).thenReturn(mockIterable);
-        when(mockIterable.projection(nullable(Document.class))).thenReturn(mockIterable);
-        when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
-        when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+        setupMockCollection(documents);
 
-        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
-                .withBucket(UUID.randomUUID().toString())
-                .withSplitId(UUID.randomUUID().toString())
-                .withQueryId(UUID.randomUUID().toString())
-                .withIsDirectory(true)
-                .build();
-
-        Split split = Split.newBuilder(splitLoc, keyFactory.create())
-                .add(DOCDB_CONN_STR, CONNECTION_STRING)
-                .build();
-
-        ReadRecordsRequest request = new ReadRecordsRequest(
-                IDENTITY,
-                DEFAULT_CATALOG,
-                "queryId-" + System.currentTimeMillis(),
-                TABLE_NAME,
-                schema,
-                split,
-                new Constraints(new HashMap<>(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
-                100_000_000_000L,
-                100_000_000_000L
-        );
+        ReadRecordsRequest request = createReadRecordsRequest(schema, createEmptyConstraints());
 
         RecordResponse rawResponse = caseInsensitiveHandler.doReadRecords(allocator, request);
 
@@ -698,29 +842,9 @@ public class DocDBRecordHandlerTest
                 .addChildField("struct_field", "nested_field", Types.MinorType.VARCHAR.getType())
                 .build();
 
-        when(mockCollection.find(nullable(Document.class))).thenReturn(mockIterable);
-        when(mockIterable.projection(nullable(Document.class))).thenReturn(mockIterable);
-        when(mockIterable.batchSize(anyInt())).thenReturn(mockIterable);
-        when(mockIterable.iterator()).thenReturn(new StubbingCursor(documents.iterator()));
+        setupMockCollection(documents);
 
-        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
-                .withBucket(UUID.randomUUID().toString())
-                .withSplitId(UUID.randomUUID().toString())
-                .withQueryId(UUID.randomUUID().toString())
-                .withIsDirectory(true)
-                .build();
-
-        ReadRecordsRequest request = new ReadRecordsRequest(
-                IDENTITY,
-                DEFAULT_CATALOG,
-                "queryId-" + System.currentTimeMillis(),
-                TABLE_NAME,
-                schema,
-                Split.newBuilder(splitLoc, keyFactory.create()).add(DOCDB_CONN_STR, CONNECTION_STRING).build(),
-                new Constraints(new HashMap<>(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, new HashMap<>(), null),
-                100_000_000_000L,
-                100_000_000_000L
-        );
+        ReadRecordsRequest request = createReadRecordsRequest(schema, createEmptyConstraints());
 
         // Test that processing a field with an error throws RuntimeException with the expected message
         RuntimeException exception = assertThrows(RuntimeException.class, () -> handler.doReadRecords(allocator, request));
@@ -735,12 +859,7 @@ public class DocDBRecordHandlerTest
                 .addStringField("field1")
                 .build();
 
-        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
-                .withBucket(UUID.randomUUID().toString())
-                .withSplitId(UUID.randomUUID().toString())
-                .withQueryId(UUID.randomUUID().toString())
-                .withIsDirectory(true)
-                .build();
+        S3SpillLocation splitLoc = createTestSpillLocation();
 
         // Create a split WITHOUT the DOCDB_CONN_STR property
         Split splitWithoutConnStr = Split.newBuilder(splitLoc, keyFactory.create()).build();
@@ -752,7 +871,7 @@ public class DocDBRecordHandlerTest
                 TABLE_NAME,
                 schema,
                 splitWithoutConnStr,
-                new Constraints(new HashMap<>(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, new HashMap<>(), null),
+                createEmptyConstraints(),
                 100_000_000_000L,
                 100_000_000_000L
         );
