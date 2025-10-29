@@ -20,6 +20,8 @@
 package com.amazonaws.athena.connectors.docdb;
 
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
+import com.amazonaws.athena.connector.lambda.domain.predicate.EquatableValueSet;
+import com.amazonaws.athena.connector.lambda.domain.predicate.Marker;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.ValueSet;
@@ -32,9 +34,14 @@ import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class QueryUtilsTest
 {
@@ -84,6 +91,157 @@ public class QueryUtilsTest
     }
 
     @Test
+    public void makePredicate_whenCalledWithEquatableValueSet_generatesEqPredicate()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a single value EquatableValueSet with nulls not allowed
+        EquatableValueSet.Builder builder = EquatableValueSet.newBuilder(
+                allocator, Types.MinorType.VARCHAR.getType(), false, false);
+        builder.add("books");
+        ValueSet equatableSet = builder.build();
+
+        Document result = QueryUtils.makePredicate(field, equatableSet);
+        assertNotNull(result, "Result should not be null");
+
+        Document expected = new Document("category", new Document("$eq", "books"));
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void makePredicate_whenCalledWithEquatableNumericValueSet_generatesEqPredicate()
+    {
+        Field field = new Field("price", FieldType.nullable(new ArrowType.Int(32, true)), null);
+
+        // Create a single value EquatableValueSet with nulls not allowed
+        EquatableValueSet.Builder builder = EquatableValueSet.newBuilder(
+                allocator, Types.MinorType.INT.getType(), false, false);
+        builder.add(100);
+        ValueSet equatableSet = builder.build();
+
+        Document result = QueryUtils.makePredicate(field, equatableSet);
+        assertNotNull(result, "Result should not be null");
+
+        Document expected = new Document("price", new Document("$eq", 100));
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void makePredicate_whenCalledWithMultipleObjectIds_usesInOperator()
+    {
+        Field field = new Field("_id", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a SortedRangeSet with multiple single values to trigger the IN operator case
+        ValueSet rangeSet = SortedRangeSet.copyOf(
+                Types.MinorType.VARCHAR.getType(),
+                ImmutableList.of(
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "4ecbe7f9e8c1c9092c000027"),
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "4ecbe7f9e8c1c9092c000028")),
+                false
+        );
+
+        Document result = QueryUtils.makePredicate(field, rangeSet);
+        assertNotNull(result, "Result should not be null");
+
+        // The implementation should convert strings to ObjectIds and use $in operator
+        Document expected = new Document("_id", 
+            new Document("$in", Arrays.asList(
+                new ObjectId("4ecbe7f9e8c1c9092c000027"),
+                new ObjectId("4ecbe7f9e8c1c9092c000028")
+            ))
+        );
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void makePredicate_whenCalledWithMultipleValues_usesInOperator()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a SortedRangeSet with multiple single values to trigger the IN operator case
+        ValueSet rangeSet = SortedRangeSet.copyOf(
+                Types.MinorType.VARCHAR.getType(),
+                ImmutableList.of(
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "books"),
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "electronics"),
+                        Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "clothing")),
+                false
+        );
+
+        Document result = QueryUtils.makePredicate(field, rangeSet);
+        assertNotNull(result, "Result should not be null");
+
+        // For non-_id fields, the implementation should use $in with the original values
+        Document expected = new Document("category", 
+            new Document("$in", Arrays.asList("books", "electronics", "clothing"))
+        );
+        
+        // Compare the documents directly instead of their JSON strings
+        Document categoryDoc = (Document) result.get("category");
+        Document expectedCategoryDoc = (Document) expected.get("category");
+        
+        assertEquals("$in", expectedCategoryDoc.keySet().iterator().next());
+        assertEquals("$in", categoryDoc.keySet().iterator().next());
+        
+        // Compare arrays ignoring order
+        assertEquals(
+            new java.util.HashSet<>((java.util.List<?>) expectedCategoryDoc.get("$in")),
+            new java.util.HashSet<>((java.util.List<?>) categoryDoc.get("$in"))
+        );
+    }
+
+    @Test
+    public void makePredicate_whenCalledWithNoneConstraint_generatesNullPredicate()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a ValueSet that represents no values (isNone)
+        ValueSet noneSet = SortedRangeSet.none(Types.MinorType.VARCHAR.getType());
+
+        Document result = QueryUtils.makePredicate(field, noneSet);
+        assertNotNull(result, "Result should not be null");
+
+        // Should generate a predicate that matches null values
+        // Using both $exists and $eq for more precise null handling in MongoDB
+        Document expected = new Document("category", 
+            new Document("$exists", true)
+            .append("$eq", null));
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void makePredicate_whenCalledWithAllConstraint_generatesNotNullPredicate()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a ValueSet that represents all values (isAll)
+        ValueSet allSet = SortedRangeSet.notNull(allocator, Types.MinorType.VARCHAR.getType());
+
+        Document result = QueryUtils.makePredicate(field, allSet);
+        assertNotNull(result, "Result should not be null");
+
+        // Should generate a predicate that matches non-null values
+        Document expected = new Document("category", new Document("$ne", null));
+        assertEquals(expected.toJson(), result.toJson());
+    }
+
+    @Test
+    public void makePredicate_whenNullAllowed_returnsNull()
+    {
+        Field field = new Field("category", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        // Create a ValueSet that allows null values
+        ValueSet nullAllowedSet = SortedRangeSet.copyOf(
+                Types.MinorType.VARCHAR.getType(),
+                ImmutableList.of(Range.equal(allocator, Types.MinorType.VARCHAR.getType(), "books")),
+                true
+        );
+
+        Document result = QueryUtils.makePredicate(field, nullAllowedSet);
+        assertNull(result, "Result should be null when null is allowed");
+    }
+
+    @Test
     public void testParseFilter()
     {
         String jsonFilter = "{ \"field\": { \"$eq\": \"value\" } }";
@@ -102,5 +260,60 @@ public class QueryUtilsTest
             QueryUtils.parseFilter(invalidJsonFilter);
         });
     }
-}
 
+    @Test
+    public void makePredicate_whenLowBoundIsInvalid_throwsIllegalArgumentException()
+    {
+        Field field = new Field("price", FieldType.nullable(new ArrowType.Int(32, true)), null);
+
+        // Create mocked Range and Marker objects
+        Marker lowMarker = mock(Marker.class);
+        Marker highMarker = mock(Marker.class);
+        Range range = mock(Range.class);
+
+        // Set up the mocks
+        when(range.isSingleValue()).thenReturn(false);
+        when(range.getLow()).thenReturn(lowMarker);
+        when(range.getHigh()).thenReturn(highMarker);
+        when(range.getType()).thenReturn(Types.MinorType.INT.getType());
+        when(lowMarker.isLowerUnbounded()).thenReturn(false);
+        when(lowMarker.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(lowMarker.getType()).thenReturn(Types.MinorType.INT.getType());
+        when(highMarker.isUpperUnbounded()).thenReturn(true);
+        when(highMarker.getType()).thenReturn(Types.MinorType.INT.getType());
+
+        ValueSet rangeSet = SortedRangeSet.copyOf(Types.MinorType.INT.getType(), ImmutableList.of(range), false);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> QueryUtils.makePredicate(field, rangeSet),
+                "Low Marker should never use BELOW bound");
+    }
+
+    @Test
+    public void makePredicate_whenHighBoundIsInvalid_throwsIllegalArgumentException()
+    {
+        Field field = new Field("price", FieldType.nullable(new ArrowType.Int(32, true)), null);
+
+        // Create mocked Range and Marker objects
+        Marker lowMarker = mock(Marker.class);
+        Marker highMarker = mock(Marker.class);
+        Range range = mock(Range.class);
+
+        // Set up the mocks
+        when(range.isSingleValue()).thenReturn(false);
+        when(range.getLow()).thenReturn(lowMarker);
+        when(range.getHigh()).thenReturn(highMarker);
+        when(range.getType()).thenReturn(Types.MinorType.INT.getType());
+        when(lowMarker.isLowerUnbounded()).thenReturn(true);
+        when(lowMarker.getType()).thenReturn(Types.MinorType.INT.getType());
+        when(highMarker.isUpperUnbounded()).thenReturn(false);
+        when(highMarker.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(highMarker.getType()).thenReturn(Types.MinorType.INT.getType());
+
+        ValueSet rangeSet = SortedRangeSet.copyOf(Types.MinorType.INT.getType(), ImmutableList.of(range), false);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> QueryUtils.makePredicate(field, rangeSet),
+                "High Marker should never use ABOVE bound");
+    }
+}
