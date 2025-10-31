@@ -1,8 +1,8 @@
 /*-
  * #%L
- * athena-cloudera-impala
+ * athena-synapse
  * %%
- * Copyright (C) 2019 Amazon Web Services
+ * Copyright (C) 2019 - 2025 Amazon Web Services
  * %%
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
  * limitations under the License.
  * #L%
  */
-package com.amazonaws.athena.connectors.cloudera;
+package com.amazonaws.athena.connectors.synapse;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -32,27 +32,29 @@ import static com.amazonaws.athena.connector.lambda.connection.EnvironmentConsta
 import static com.amazonaws.athena.connector.lambda.connection.EnvironmentConstants.SECRET_NAME;
 import static org.junit.Assert.assertEquals;
 
-public class ImpalaEnvironmentPropertiesTest
+public class SynapseEnvironmentPropertiesTest
 {
-    Map<String, String> connectionProperties;
-    ImpalaEnvironmentProperties impalaEnvironmentProperties;
+    private Map<String, String> connectionProperties;
+    private SynapseEnvironmentProperties synapseEnvironmentProperties;
 
     @Before
     public void setUp()
     {
         connectionProperties = new HashMap<>();
-        connectionProperties.put(HOST, "localhost");
-        connectionProperties.put(DATABASE, "default");
-        connectionProperties.put(SECRET_NAME, "testSecret");
-        connectionProperties.put(PORT, "49172");
-        impalaEnvironmentProperties = new ImpalaEnvironmentProperties();
+        connectionProperties.put(HOST, "test.sql.azuresynapse.net");
+        connectionProperties.put(PORT, "1433");
+        connectionProperties.put(DATABASE, "testdb");
+        connectionProperties.put(SECRET_NAME, "synapse-secret");
+
+        synapseEnvironmentProperties = new SynapseEnvironmentProperties();
     }
 
     @Test
-    public void testImpalaConnectionProperties()
+    public void connectionPropertiesToEnvironment_WithValidProperties_ReturnsCorrectConnectionString()
     {
-        Map<String, String> impalaConnectionProperties = impalaEnvironmentProperties.connectionPropertiesToEnvironment(connectionProperties);
-        String expectedConnectionString = "impala://jdbc:impala://localhost:49172/default;${testSecret}";
-        assertEquals(expectedConnectionString, impalaConnectionProperties.get(DEFAULT));
+        Map<String, String> synapseConnectionProperties = synapseEnvironmentProperties.connectionPropertiesToEnvironment(connectionProperties);
+
+        String expectedConnectionString = "synapse://jdbc:sqlserver://test.sql.azuresynapse.net:1433;databaseName=testdb;${synapse-secret}";
+        assertEquals(expectedConnectionString, synapseConnectionProperties.get(DEFAULT));
     }
 }
