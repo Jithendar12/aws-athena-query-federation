@@ -84,7 +84,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.nullable;
 
 public class SqlServerMetadataHandlerTest
@@ -132,7 +131,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = Mockito.mock(Constraints.class);
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
         TableName tableName = new TableName("testSchema", "testTable");
         Schema partitionSchema = this.sqlServerMetadataHandler.getPartitionSchema("testCatalogName");
         Set<String> partitionCols = partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
@@ -181,7 +180,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = Mockito.mock(Constraints.class);
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
         TableName tableName = new TableName("testSchema", "testTable");
         Schema partitionSchema = this.sqlServerMetadataHandler.getPartitionSchema("testCatalogName");
         Set<String> partitionCols = partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
@@ -210,7 +209,7 @@ public class SqlServerMetadataHandlerTest
         for (int i = 0; i < getTableLayoutResponse.getPartitions().getRowCount(); i++) {
             actualValues.add(BlockUtils.rowToString(getTableLayoutResponse.getPartitions(), i));
         }
-        assertEquals(Arrays.asList("[partition_number : 0]"), actualValues);
+        assertEquals(List.of("[partition_number : 0]"), actualValues);
 
         SchemaBuilder expectedSchemaBuilder = SchemaBuilder.newBuilder();
         expectedSchemaBuilder.addField(FieldBuilder.newBuilder(PARTITION_NUMBER, org.apache.arrow.vector.types.Types.MinorType.VARCHAR.getType()).build());
@@ -226,7 +225,7 @@ public class SqlServerMetadataHandlerTest
     public void doGetTableLayoutWithSQLException()
             throws Exception
     {
-        Constraints constraints = Mockito.mock(Constraints.class);
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
         TableName tableName = new TableName("testSchema", "testTable");
         Schema partitionSchema = this.sqlServerMetadataHandler.getPartitionSchema("testCatalogName");
         Set<String> partitionCols = partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
@@ -246,7 +245,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = Mockito.mock(Constraints.class);
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
         TableName tableName = new TableName("testSchema", "testTable");
 
         PreparedStatement viewCheckPreparedStatement = Mockito.mock(PreparedStatement.class);
@@ -308,7 +307,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = Mockito.mock(Constraints.class);
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
         TableName tableName = new TableName("testSchema", "testTable");
 
         PreparedStatement viewCheckPreparedStatement = Mockito.mock(PreparedStatement.class);
@@ -354,7 +353,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = Mockito.mock(Constraints.class);
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
         TableName tableName = new TableName("testSchema", "testTable");
         Schema partitionSchema = this.sqlServerMetadataHandler.getPartitionSchema("testCatalogName");
         Set<String> partitionCols = partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
@@ -470,9 +469,7 @@ public class SqlServerMetadataHandlerTest
     }
 
     @Test
-    public void testDoGetTable_withSqlServerSpecificTypes()
-    {
-        try {
+    public void testDoGetTable_withSqlServerSpecificTypes() throws Exception {
             BlockAllocator blockAllocator = new BlockAllocatorImpl();
             String[] schema = {"DATA_TYPE", "COLUMN_SIZE", "COLUMN_NAME", "DECIMAL_DIGITS", "NUM_PREC_RADIX"};
             Object[][] values = {
@@ -545,16 +542,10 @@ public class SqlServerMetadataHandlerTest
             );
 
             assertEquals(expected, getTableResponse.getSchema());
-        }
-        catch (Exception e) {
-            fail("Unexpected exception:" + e.getMessage());
-        }
     }
 
     @Test
-    public void testDoGetTable_withUnsupported_fallbackToVarchar()
-    {
-        try {
+    public void testDoGetTable_withUnsupported_fallbackToVarchar() throws Exception {
             BlockAllocator blockAllocator = new BlockAllocatorImpl();
             String[] schema = {"DATA_TYPE", "COLUMN_SIZE", "COLUMN_NAME", "DECIMAL_DIGITS", "NUM_PREC_RADIX"};
             Object[][] values = {
@@ -603,16 +594,10 @@ public class SqlServerMetadataHandlerTest
             );
 
             assertEquals(expected, getTableResponse.getSchema());
-        }
-        catch (Exception e) {
-            fail("Unexpected exception:" + e.getMessage());
-        }
     }
 
     @Test
-    public void testConvertDatasourceTypeToArrow_withSqlServerSpecificTypes()
-    {
-        try {
+    public void testConvertDatasourceTypeToArrow_withSqlServerSpecificTypes() throws SQLException {
             ResultSetMetaData metaData = Mockito.mock(ResultSetMetaData.class);
             Map<String, String> configOptions = new HashMap<>();
             int precision = 0;
@@ -642,10 +627,6 @@ public class SqlServerMetadataHandlerTest
 
                 index++;
             }
-        }
-        catch (Exception e) {
-            fail("Unexpected exception:" + e.getMessage());
-        }
     }
 
     @Test

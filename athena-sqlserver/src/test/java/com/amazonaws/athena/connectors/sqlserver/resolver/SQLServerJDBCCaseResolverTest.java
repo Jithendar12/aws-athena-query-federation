@@ -37,7 +37,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.amazonaws.athena.connector.lambda.resolver.CaseResolver.CASING_MODE_CONFIGURATION_KEY;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -55,9 +54,7 @@ public class SQLServerJDBCCaseResolverTest extends TestBase
     }
 
     @Test
-    public void testCaseInsensitiveCaseOnName()
-    {
-        try {
+    public void testCaseInsensitiveCaseOnName() throws SQLException {
             String schemaName = "oRaNgE";
             String tableName = "ApPlE";
             DefaultJDBCCaseResolver resolver = new SQLServerJDBCCaseResolver("sqlserver");
@@ -85,16 +82,10 @@ public class SQLServerJDBCCaseResolverTest extends TestBase
             String adjustedTableName = resolver.getAdjustedTableNameString(mockConnection, schemaName, tableName, Map.of(
                     CASING_MODE_CONFIGURATION_KEY, CaseResolver.FederationSDKCasingMode.CASE_INSENSITIVE_SEARCH.name()));
             assertEquals(tableName.toUpperCase(), adjustedTableName);
-        }
-        catch (Exception e) {
-            fail("Unexpected exception:" + e.getMessage());
-        }
     }
 
     @Test
-    public void testCaseInsensitiveCaseOnObject()
-    {
-        try {
+    public void testCaseInsensitiveCaseOnObject() throws SQLException {
             String schemaName = "oRaNgE";
             String tableName = "ApPlE";
             DefaultJDBCCaseResolver resolver = new SQLServerJDBCCaseResolver("sqlserver");
@@ -119,9 +110,5 @@ public class SQLServerJDBCCaseResolverTest extends TestBase
                     new TableName(schemaName, tableName),
                     Map.of(CASING_MODE_CONFIGURATION_KEY, CaseResolver.FederationSDKCasingMode.CASE_INSENSITIVE_SEARCH.name()));
             assertEquals(new TableName(schemaName.toLowerCase(), tableName.toUpperCase()), adjusted);
-        }
-        catch (Exception e) {
-            fail("Unexpected exception:" + e.getMessage());
-        }
     }
 }
