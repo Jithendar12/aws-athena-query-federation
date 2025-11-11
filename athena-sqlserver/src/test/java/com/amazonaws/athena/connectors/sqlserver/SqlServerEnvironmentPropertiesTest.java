@@ -50,11 +50,35 @@ public class SqlServerEnvironmentPropertiesTest
     }
 
     @Test
-    public void testSqlServerConnectionString()
+    public void connectionPropertiesToEnvironment_WithValidProperties_ReturnsExpectedConnectionString()
     {
         Map<String, String> sqlServerConnectionProperties = sqlServerEnvironmentProperties.connectionPropertiesToEnvironment(connectionProperties);
 
         String expectedConnectionString = "sqlserver://jdbc:sqlserver://test.sqlserver.com:1433;databaseName=testdb;${sqlserver-secret}";
         assertEquals(expectedConnectionString, sqlServerConnectionProperties.get(DEFAULT));
+    }
+    
+    @Test
+    public void getDelimiter_ReturnsSemicolonDelimiter()
+    {
+        assertEquals(";", sqlServerEnvironmentProperties.getDelimiter());
+    }
+    
+    @Test
+    public void getConnectionStringPrefix_WithValidProperties_ReturnsPrefix()
+    {
+        assertEquals("sqlserver://jdbc:sqlserver://", sqlServerEnvironmentProperties.getConnectionStringPrefix(connectionProperties));
+    }
+    
+    @Test
+    public void getJdbcParametersSeparator_ReturnsSemicolonSeparator()
+    {
+        assertEquals(";", sqlServerEnvironmentProperties.getJdbcParametersSeparator());
+    }
+    
+    @Test(expected = NullPointerException.class)
+    public void connectionPropertiesToEnvironment_WithNullProperties_ThrowsNullPointerException()
+    {
+        sqlServerEnvironmentProperties.connectionPropertiesToEnvironment(null);
     }
 }
