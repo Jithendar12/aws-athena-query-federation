@@ -742,18 +742,21 @@ loadScripts(document, 'script');</script>
 <div class="col-first odd-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.DRIVER_CLASS">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
 <div class="col-second odd-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#DRIVER_CLASS">DRIVER_CLASS</a></code></div>
 <div class="col-last odd-row-color"><code>"com.ibm.db2.jcc.DB2Driver"</code></div>
-<div class="col-first even-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.NAME">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
-<div class="col-second even-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#NAME">NAME</a></code></div>
-<div class="col-last even-row-color"><code>"dbtwo"</code></div>
-<div class="col-first odd-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.QRY_TO_LIST_SCHEMAS">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
-<div class="col-second odd-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#QRY_TO_LIST_SCHEMAS">QRY_TO_LIST_SCHEMAS</a></code></div>
-<div class="col-last odd-row-color"><code>"select schemaname as name from syscat.schemata where schemaname not like \'SYS%\' and  schemaname not IN (\'SQLJ\', \'NULLID\') order by name"</code></div>
-<div class="col-first even-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.QRY_TO_LIST_TABLES_AND_VIEWS">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
-<div class="col-second even-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#QRY_TO_LIST_TABLES_AND_VIEWS">QRY_TO_LIST_TABLES_AND_VIEWS</a></code></div>
-<div class="col-last even-row-color"><code>"select tabname as name from syscat.tables where type in (\'T\', \'U\', \'V\', \'W\') and tabschema = ? order by tabname"</code></div>
-<div class="col-first odd-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.QUOTE_CHARACTER">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
-<div class="col-second odd-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#QUOTE_CHARACTER">QUOTE_CHARACTER</a></code></div>
-<div class="col-last odd-row-color"><code>"\""</code></div>
+<div class="col-first even-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.LIST_PAGINATED_TABLES_QUERY">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
+<div class="col-second even-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#LIST_PAGINATED_TABLES_QUERY">LIST_PAGINATED_TABLES_QUERY</a></code></div>
+<div class="col-last even-row-color"><code>"select tabschema AS \"TABLE_SCHEM\", tabname AS \"TABLE_NAME\" from syscat.tables where type in (\'T\', \'U\', \'V\', \'W\') and tabschema = ? ORDER BY tabname OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"</code></div>
+<div class="col-first odd-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.NAME">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
+<div class="col-second odd-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#NAME">NAME</a></code></div>
+<div class="col-last odd-row-color"><code>"dbtwo"</code></div>
+<div class="col-first even-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.QRY_TO_LIST_SCHEMAS">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
+<div class="col-second even-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#QRY_TO_LIST_SCHEMAS">QRY_TO_LIST_SCHEMAS</a></code></div>
+<div class="col-last even-row-color"><code>"select schemaname as name from syscat.schemata where schemaname not like \'SYS%\' and  schemaname not IN (\'SQLJ\', \'NULLID\') order by name"</code></div>
+<div class="col-first odd-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.QRY_TO_LIST_TABLES_AND_VIEWS">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
+<div class="col-second odd-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#QRY_TO_LIST_TABLES_AND_VIEWS">QRY_TO_LIST_TABLES_AND_VIEWS</a></code></div>
+<div class="col-last odd-row-color"><code>"select tabname as name from syscat.tables where type in (\'T\', \'U\', \'V\', \'W\') and tabschema = ? order by tabname"</code></div>
+<div class="col-first even-row-color"><code id="com.amazonaws.athena.connectors.db2.Db2Constants.QUOTE_CHARACTER">public&nbsp;static&nbsp;final&nbsp;<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a></code></div>
+<div class="col-second even-row-color"><code><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#QUOTE_CHARACTER">QUOTE_CHARACTER</a></code></div>
+<div class="col-last even-row-color"><code>"\""</code></div>
 </div>
 </li>
 </ul>

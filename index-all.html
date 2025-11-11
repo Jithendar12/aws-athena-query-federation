@@ -622,6 +622,8 @@ loadScripts(document, 'script');</script>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryMetadataHandler.html" class="type-name-link" title="class in com.amazonaws.athena.connectors.google.bigquery">BigQueryMetadataHandler</a> - Class in <a href="com/amazonaws/athena/connectors/google/bigquery/package-summary.html">com.amazonaws.athena.connectors.google.bigquery</a></dt>
 <dd>&nbsp;</dd>
+<dt><a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryMetadataHandler.html#%3Cinit%3E(com.amazonaws.athena.connector.lambda.security.EncryptionKeyFactory,software.amazon.awssdk.services.secretsmanager.SecretsManagerClient,software.amazon.awssdk.services.athena.AthenaClient,java.lang.String,java.lang.String,java.lang.String,java.util.Map)" class="member-name-link">BigQueryMetadataHandler(EncryptionKeyFactory, SecretsManagerClient, AthenaClient, String, String, String, Map&lt;String, String&gt;)</a> - Constructor for class com.amazonaws.athena.connectors.google.bigquery.<a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryMetadataHandler.html" title="class in com.amazonaws.athena.connectors.google.bigquery">BigQueryMetadataHandler</a></dt>
+<dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/google/bigquery/qpt/BigQueryQueryPassthrough.html" class="type-name-link" title="class in com.amazonaws.athena.connectors.google.bigquery.qpt">BigQueryQueryPassthrough</a> - Class in <a href="com/amazonaws/athena/connectors/google/bigquery/qpt/package-summary.html">com.amazonaws.athena.connectors.google.bigquery.qpt</a></dt>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/google/bigquery/qpt/BigQueryQueryPassthrough.html#%3Cinit%3E()" class="member-name-link">BigQueryQueryPassthrough()</a> - Constructor for class com.amazonaws.athena.connectors.google.bigquery.qpt.<a href="com/amazonaws/athena/connectors/google/bigquery/qpt/BigQueryQueryPassthrough.html" title="class in com.amazonaws.athena.connectors.google.bigquery.qpt">BigQueryQueryPassthrough</a></dt>
@@ -4667,6 +4669,8 @@ loadScripts(document, 'script');</script>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryUtils.html#getBigQueryClient(java.util.Map)" class="member-name-link">getBigQueryClient(Map&lt;String, String&gt;)</a> - Static method in class com.amazonaws.athena.connectors.google.bigquery.<a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryUtils.html" title="class in com.amazonaws.athena.connectors.google.bigquery">BigQueryUtils</a></dt>
 <dd>&nbsp;</dd>
+<dt><a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryUtils.html#getBigQueryClient(java.util.Map,java.lang.String)" class="member-name-link">getBigQueryClient(Map&lt;String, String&gt;, String)</a> - Static method in class com.amazonaws.athena.connectors.google.bigquery.<a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryUtils.html" title="class in com.amazonaws.athena.connectors.google.bigquery">BigQueryUtils</a></dt>
+<dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connector/lambda/data/BlockSpiller.html#getBlock()" class="member-name-link">getBlock()</a> - Method in interface com.amazonaws.athena.connector.lambda.data.<a href="com/amazonaws/athena/connector/lambda/data/BlockSpiller.html" title="interface in com.amazonaws.athena.connector.lambda.data">BlockSpiller</a></dt>
 <dd>
 <div class="block">Provides access to the single buffered block in the event that spilled() is false.</div>
@@ -5059,6 +5063,8 @@ loadScripts(document, 'script');</script>
 <dd>
 <div class="block">Gets the SecretManager credentials obtained using a secret name stored in the test-config.json file.</div>
 </dd>
+<dt><a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryUtils.html#getCredentialsFromSecret(java.lang.String)" class="member-name-link">getCredentialsFromSecret(String)</a> - Static method in class com.amazonaws.athena.connectors.google.bigquery.<a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryUtils.html" title="class in com.amazonaws.athena.connectors.google.bigquery">BigQueryUtils</a></dt>
+<dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryUtils.html#getCredentialsFromSecretsManager(java.util.Map)" class="member-name-link">getCredentialsFromSecretsManager(Map&lt;String, String&gt;)</a> - Static method in class com.amazonaws.athena.connectors.google.bigquery.<a href="com/amazonaws/athena/connectors/google/bigquery/BigQueryUtils.html" title="class in com.amazonaws.athena.connectors.google.bigquery">BigQueryUtils</a></dt>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connector/credentials/CrossAccountCredentialsProvider.html#getCrossAccountCredentialsIfPresent(java.util.Map,java.lang.String)" class="member-name-link">getCrossAccountCredentialsIfPresent(Map&lt;String, String&gt;, String)</a> - Static method in class com.amazonaws.athena.connector.credentials.<a href="com/amazonaws/athena/connector/credentials/CrossAccountCredentialsProvider.html" title="class in com.amazonaws.athena.connector.credentials">CrossAccountCredentialsProvider</a></dt>
@@ -5204,6 +5210,10 @@ loadScripts(document, 'script');</script>
 <div class="block">Public accessor for the Connector's environment variables.</div>
 </dd>
 <dt><a href="com/amazonaws/athena/connector/lambda/connection/EnvironmentProperties.html#getEnvMap()" class="member-name-link">getEnvMap()</a> - Method in class com.amazonaws.athena.connector.lambda.connection.<a href="com/amazonaws/athena/connector/lambda/connection/EnvironmentProperties.html" title="class in com.amazonaws.athena.connector.lambda.connection">EnvironmentProperties</a></dt>
+<dd>
+<div class="block">Extracted method for environment variables to allow overriding in tests.</div>
+</dd>
+<dt><a href="com/amazonaws/athena/connectors/oracle/OracleJdbcConnectionFactory.html#getEnvMap()" class="member-name-link">getEnvMap()</a> - Method in class com.amazonaws.athena.connectors.oracle.<a href="com/amazonaws/athena/connectors/oracle/OracleJdbcConnectionFactory.html" title="class in com.amazonaws.athena.connectors.oracle">OracleJdbcConnectionFactory</a></dt>
 <dd>
 <div class="block">Extracted method for environment variables to allow overriding in tests.</div>
 </dd>
@@ -5815,6 +5825,8 @@ loadScripts(document, 'script');</script>
 <dt><a href="com/amazonaws/athena/connectors/redshift/RedshiftMetadataHandler.html#getPaginatedResults(java.sql.Connection,java.lang.String,int,int)" class="member-name-link">getPaginatedResults(Connection, String, int, int)</a> - Method in class com.amazonaws.athena.connectors.redshift.<a href="com/amazonaws/athena/connectors/redshift/RedshiftMetadataHandler.html" title="class in com.amazonaws.athena.connectors.redshift">RedshiftMetadataHandler</a></dt>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/clickhouse/ClickHouseMetadataHandler.html#getPaginatedTables(java.sql.Connection,java.lang.String,int,int)" class="member-name-link">getPaginatedTables(Connection, String, int, int)</a> - Method in class com.amazonaws.athena.connectors.clickhouse.<a href="com/amazonaws/athena/connectors/clickhouse/ClickHouseMetadataHandler.html" title="class in com.amazonaws.athena.connectors.clickhouse">ClickHouseMetadataHandler</a></dt>
+<dd>&nbsp;</dd>
+<dt><a href="com/amazonaws/athena/connectors/db2/Db2MetadataHandler.html#getPaginatedTables(java.sql.Connection,java.lang.String,int,int)" class="member-name-link">getPaginatedTables(Connection, String, int, int)</a> - Method in class com.amazonaws.athena.connectors.db2.<a href="com/amazonaws/athena/connectors/db2/Db2MetadataHandler.html" title="class in com.amazonaws.athena.connectors.db2">Db2MetadataHandler</a></dt>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/mysql/MySqlMetadataHandler.html#getPaginatedTables(java.sql.Connection,java.lang.String,int,int)" class="member-name-link">getPaginatedTables(Connection, String, int, int)</a> - Method in class com.amazonaws.athena.connectors.mysql.<a href="com/amazonaws/athena/connectors/mysql/MySqlMetadataHandler.html" title="class in com.amazonaws.athena.connectors.mysql">MySqlMetadataHandler</a></dt>
 <dd>&nbsp;</dd>
@@ -8227,6 +8239,8 @@ loadScripts(document, 'script');</script>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connector/lambda/data/SupportedTypes.html#LIST" class="member-name-link">LIST</a> - Enum constant in enum class com.amazonaws.athena.connector.lambda.data.<a href="com/amazonaws/athena/connector/lambda/data/SupportedTypes.html" title="enum class in com.amazonaws.athena.connector.lambda.data">SupportedTypes</a></dt>
 <dd>&nbsp;</dd>
+<dt><a href="com/amazonaws/athena/connectors/db2/Db2Constants.html#LIST_PAGINATED_TABLES_QUERY" class="member-name-link">LIST_PAGINATED_TABLES_QUERY</a> - Static variable in class com.amazonaws.athena.connectors.db2.<a href="com/amazonaws/athena/connectors/db2/Db2Constants.html" title="class in com.amazonaws.athena.connectors.db2">Db2Constants</a></dt>
+<dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/saphana/SaphanaMetadataHandler.html#LIST_PAGINATED_TABLES_QUERY" class="member-name-link">LIST_PAGINATED_TABLES_QUERY</a> - Static variable in class com.amazonaws.athena.connectors.saphana.<a href="com/amazonaws/athena/connectors/saphana/SaphanaMetadataHandler.html" title="class in com.amazonaws.athena.connectors.saphana">SaphanaMetadataHandler</a></dt>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connector/lambda/metadata/MetadataRequestType.html#LIST_SCHEMAS" class="member-name-link">LIST_SCHEMAS</a> - Enum constant in enum class com.amazonaws.athena.connector.lambda.metadata.<a href="com/amazonaws/athena/connector/lambda/metadata/MetadataRequestType.html" title="enum class in com.amazonaws.athena.connector.lambda.metadata">MetadataRequestType</a></dt>
@@ -8258,6 +8272,8 @@ loadScripts(document, 'script');</script>
 <div class="block">Lists the available namespaces in the HBase instance.</div>
 </dd>
 <dt><a href="com/amazonaws/athena/connectors/clickhouse/ClickHouseMetadataHandler.html#listPaginatedTables(java.sql.Connection,com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest)" class="member-name-link">listPaginatedTables(Connection, ListTablesRequest)</a> - Method in class com.amazonaws.athena.connectors.clickhouse.<a href="com/amazonaws/athena/connectors/clickhouse/ClickHouseMetadataHandler.html" title="class in com.amazonaws.athena.connectors.clickhouse">ClickHouseMetadataHandler</a></dt>
+<dd>&nbsp;</dd>
+<dt><a href="com/amazonaws/athena/connectors/db2/Db2MetadataHandler.html#listPaginatedTables(java.sql.Connection,com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest)" class="member-name-link">listPaginatedTables(Connection, ListTablesRequest)</a> - Method in class com.amazonaws.athena.connectors.db2.<a href="com/amazonaws/athena/connectors/db2/Db2MetadataHandler.html" title="class in com.amazonaws.athena.connectors.db2">Db2MetadataHandler</a></dt>
 <dd>&nbsp;</dd>
 <dt><a href="com/amazonaws/athena/connectors/jdbc/manager/JdbcMetadataHandler.html#listPaginatedTables(java.sql.Connection,com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest)" class="member-name-link">listPaginatedTables(Connection, ListTablesRequest)</a> - Method in class com.amazonaws.athena.connectors.jdbc.manager.<a href="com/amazonaws/athena/connectors/jdbc/manager/JdbcMetadataHandler.html" title="class in com.amazonaws.athena.connectors.jdbc.manager">JdbcMetadataHandler</a></dt>
 <dd>
