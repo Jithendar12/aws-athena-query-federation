@@ -54,8 +54,9 @@ jobs:
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
           S3_DATA_PATH: ${{ secrets.S3_DATA_PATH }}
           SPILL_BUCKET: ${{ secrets.SPILL_BUCKET }}
+          JAVA_VERSION: ${{ matrix.java-version }}
       - name: Upload coverage reports to Codecov
-        if: ${{ matrix.java-version == '17' }}
+        if: ${{ matrix.java-version == '11' }}
         uses: codecov/codecov-action@v5
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

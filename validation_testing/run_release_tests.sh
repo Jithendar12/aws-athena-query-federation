@@ -16,7 +16,11 @@ aws ecr create-repository --repository-name athena-federation-repository-$CONNEC
 
 # push the ECR image for the connector to the ECR repository
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
-docker build -t athena-federation-repository-$CONNECTOR_NAME $REPOSITORY_ROOT/athena-$CONNECTOR_NAME
+if [ "$JAVA_VERSION" = "17" ]; then
+  docker build --build-arg JAVA_VERSION=17 --build-arg JAVA_TOOL_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED -XX:-TieredCompilation" -t athena-federation-repository-$CONNECTOR_NAME $REPOSITORY_ROOT/athena-$CONNECTOR_NAME
+else
+  docker build -t athena-federation-repository-$CONNECTOR_NAME $REPOSITORY_ROOT/athena-$CONNECTOR_NAME
+fi
 docker tag athena-federation-repository-$CONNECTOR_NAME\:latest $ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/athena-federation-repository-$CONNECTOR_NAME\:latest
 docker push $ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/athena-federation-repository-$CONNECTOR_NAME\:latest
 
