@@ -23,21 +23,21 @@ jobs:
         run: mvn -B javadoc:aggregate --file pom.xml -Dorg.slf4j.simpleLogger.defaultLogLevel=WARN --no-transfer-progress
 
       - name: Switch to gh-pages branch
-        if: ${{ matrix.java-version == '17' }}
+        if: ${{ matrix.java-version == '11' }}
         run: |
           git fetch
           git checkout gh-pages
 
       - name: Remove old files
-        if: ${{ matrix.java-version == '17' }}
+        if: ${{ matrix.java-version == '11' }}
         run: rm -rf com
 
       - name: Copy new files
-        if: ${{ matrix.java-version == '17' }}
+        if: ${{ matrix.java-version == '11' }}
         run: cp -r target/reports/apidocs/* .
 
       - name: Commit files
-        if: ${{ matrix.java-version == '17' }}
+        if: ${{ matrix.java-version == '11' }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -47,7 +47,7 @@ jobs:
           git diff-index --quiet HEAD || git commit -m "Syncing javadoc from master:$GITHUB_SHA" -a
 
       - name: Push changes
-        if: ${{ matrix.java-version == '17' }}
+        if: ${{ matrix.java-version == '11' }}
         uses: ad-m/github-push-action@master
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
