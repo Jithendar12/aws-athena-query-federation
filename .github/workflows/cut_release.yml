@@ -59,6 +59,7 @@ jobs:
 
       - name: Push the release branch
         run: |
+          git push origin --delete release_${NEW_RELEASE_VERSION} 2>/dev/null || echo "Branch doesn't exist, continuing..."
           git push origin release_${NEW_RELEASE_VERSION}:release_${NEW_RELEASE_VERSION}
 
       - name: Sync up with origin again now that the new branch has been pushed
