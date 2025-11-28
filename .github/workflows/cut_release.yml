@@ -79,7 +79,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
-          ref: release_${{ needs.cut_release.outputs.NEW_RELEASE_VERSION }}
+          fetch-depth: 0
+
+      - name: Wait for release branch and checkout
+        run: |
+          for i in {1..30}; do
+            if git ls-remote --heads origin release_${{ needs.cut_release.outputs.NEW_RELEASE_VERSION }} | grep -q release_${{ needs.cut_release.outputs.NEW_RELEASE_VERSION }}; then
+              echo "Release branch found, checking out..."
+              git fetch origin
+              git checkout release_${{ needs.cut_release.outputs.NEW_RELEASE_VERSION }}
+              break
+            else
+              echo "Waiting for release branch to be created... ($i/30)"
+              sleep 10
+            fi
+          done
 
       - name: Set up JDK ${{ matrix.java-version }}
         uses: actions/setup-java@v5
