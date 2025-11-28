@@ -6,7 +6,7 @@ on:
 jobs:
   cut_release:
     name: Cut a release
-    runs-on: aws-athena-query-federation_ubuntu-latest_16-core
+    runs-on: ubuntu-latest
     steps:
       - name: Setup dependencies
         run: |
@@ -71,7 +71,7 @@ jobs:
   build:
     name: Build Java ${{ matrix.java-version }} jars
     needs: cut_release
-    runs-on: aws-athena-query-federation_ubuntu-latest_16-core
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         java-version: ['11', '17']
@@ -120,7 +120,7 @@ jobs:
   publish:
     name: Publish release
     needs: [cut_release, build]
-    runs-on: aws-athena-query-federation_ubuntu-latest_16-core
+    runs-on: ubuntu-latest
     if: always() && needs.build.result == 'success'
     steps:
       - name: Download Java 11 artifacts
