@@ -5,7 +5,7 @@ on:
 
 jobs:
   cut_release:
-    name: Cut a release
+    name: Build Java ${{ matrix.java-version }} jars
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -29,7 +29,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # See: https://stackoverflow.com/a/57969570
       - name: Setup previous release version environment variable
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,7 +54,6 @@ jobs:
           python3 tools/bump_versions/bump_sdk_version.py
           python3 tools/bump_versions/bump_connectors_version.py
 
-      # Committer identity setup
       - name: Setup workflow git committer user
         if: ${{ matrix.java-version == '11' }}
         run: |
@@ -74,7 +72,6 @@ jobs:
       - name: Build Maven project
         run: mvn clean package -T 1C -DskipTests -Dorg.slf4j.simpleLogger.defaultLogLevel=WARN --no-transfer-progress
 
-      # Copy artifacts ONLY for Java 11
       - name: Copy Java 11 artifacts
         if: ${{ matrix.java-version == '11' }}
         run: |
@@ -88,10 +85,10 @@ jobs:
           mkdir -p /tmp/java11_connector_zips/
           find athena-*/target/ -name "*.zip" -type f | grep -v "test" | grep -v "arrow" | grep -v "/original" | grep -v "example" | grep -v "\-sdk-" | grep -v "\-dsv2/" | xargs -I{} cp {} /tmp/java11_connector_zips/
 
-      - name: Push the release branch
+      - name: Push the release branch (force)
         if: ${{ matrix.java-version == '11' }}
         run: |
-          git push origin release_${NEW_RELEASE_VERSION}:release_${NEW_RELEASE_VERSION}
+          git push --force origin release_${NEW_RELEASE_VERSION}:release_${NEW_RELEASE_VERSION}
 
       - name: Sync with origin
         if: ${{ matrix.java-version == '11' }}
@@ -109,7 +106,7 @@ jobs:
           
           Binary distribution of the SDK can be found here. For pre-built versions of the connector and UDF suite please:
           
-          1. Navigate to Serverless Application Repository and search for "athena-federation".  Also check the checkbox labeled "Show apps that create custom IAM roles or resource policies".
+          1. Navigate to Serverless Application Repository and search for "athena-federation". Also check the checkbox labeled "Show apps that create custom IAM roles or resource policies".
           
           2. Look for entries published by the "Amazon Athena Federation" author.
           
