@@ -5,7 +5,7 @@ on:
 
 jobs:
   cut_release:
-    name: Build Java ${{ matrix.java-version }} jars
+    name: Cut a release
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -69,7 +69,7 @@ jobs:
           git log --format='  - %s' $PREVIOUS_RELEASE_TAG..HEAD >> /tmp/RELEASE_MESSAGE
           git commit -a -F /tmp/RELEASE_MESSAGE
 
-      - name: Build Maven project
+      - name: Build Java ${{ matrix.java-version }} jars
         run: mvn clean package -T 1C -DskipTests -Dorg.slf4j.simpleLogger.defaultLogLevel=WARN --no-transfer-progress
 
       - name: Copy Java 11 artifacts
