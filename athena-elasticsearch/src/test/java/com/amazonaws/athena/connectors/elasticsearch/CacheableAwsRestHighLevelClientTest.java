@@ -33,7 +33,9 @@ import java.io.IOException;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 /**
@@ -154,5 +156,62 @@ public class CacheableAwsRestHighLevelClientTest
         assertNull("Invalid value returned from cache.", clientCache.get("endpoint1"));
 
         logger.info("evictExceededCapacityClientTest - exit");
+    }
+
+    @Test
+    public void evictCache_withEndpoint_removesClient()
+    {
+        clientCache.put("endpoint1", client1);
+        clientCache.put("endpoint2", client2);
+
+        assertEquals("Cache should have 2 clients", 2, clientCache.size());
+
+        // Use reflection to call private evictCache(String) method
+        try {
+            java.lang.reflect.Method method = CacheableAwsRestHighLevelClient.class.getDeclaredMethod("evictCache", String.class);
+            method.setAccessible(true);
+            method.invoke(clientCache, "endpoint1");
+        }
+        catch (Exception e) {
+            fail("Failed to invoke evictCache method: " + e.getMessage());
+        }
+
+        assertEquals("Cache should have 1 client after eviction", 1, clientCache.size());
+        assertNull("Evicted client should not be in cache", clientCache.get("endpoint1"));
+    }
+
+    @Test
+    public void clientIsHealthy_whenIOException_returnsFalse()
+            throws IOException
+    {
+        when(client1.ping(any())).thenThrow(new IOException("Connection failed"));
+        clientCache.put("endpoint1", client1);
+
+        assertNull("Unhealthy client should not be returned", clientCache.get("endpoint1"));
+        assertEquals("Cache should be empty after unhealthy client eviction", 0, clientCache.size());
+    }
+
+    @Test
+    public void closeClient_whenIOException_handlesGracefully()
+    {
+        try {
+            doThrow(new IOException("Close failed")).when(client1).close();
+            clientCache.put("endpoint1", client1);
+
+            // Force eviction which will call closeClient
+            try {
+                java.lang.reflect.Method method = CacheableAwsRestHighLevelClient.class.getDeclaredMethod("evictCache", String.class);
+                method.setAccessible(true);
+                method.invoke(clientCache, "endpoint1");
+            }
+            catch (Exception e) {
+                fail("Failed to invoke evictCache method: " + e.getMessage());
+            }
+
+            assertEquals("Cache should be empty after eviction", 0, clientCache.size());
+        }
+        catch (Exception e) {
+            fail("Exception should be handled gracefully: " + e.getMessage());
+        }
     }
 }

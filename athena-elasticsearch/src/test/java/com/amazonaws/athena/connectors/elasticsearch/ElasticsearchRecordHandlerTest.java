@@ -85,6 +85,7 @@ import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
@@ -315,6 +316,55 @@ public class ElasticsearchRecordHandlerTest
         logger.info("setUpBefore - exit");
     }
 
+    private Map<String, Object> createDocument1()
+            throws Exception
+    {
+        return new ObjectMapper().readValue(
+                "{\n" +
+                "  \"mytext\" : \"My favorite Sci-Fi movie is Interstellar.\",\n" +
+                "  \"mykeyword\" : \"I love keywords.\",\n" +
+                "  \"mylong\" : [\n" +
+                "    11,\n" +
+                "    12,\n" +
+                "    13\n" +
+                "  ],\n" +
+                "  \"myinteger\" : 666115,\n" +
+                "  \"myshort\" : 1972,\n" +
+                "  \"mybyte\" : [\n" +
+                "    5,\n" +
+                "    6\n" +
+                "  ],\n" +
+                "  \"mydouble\" : 47.5,\n" +
+                "  \"myscaled\" : 0.666,\n" +
+                "  \"myfloat\" : 5.6,\n" +
+                "  \"myhalf\" : 6.2,\n" +
+                "  \"mydatemilli\" : \"2020-05-15T06:49:30\",\n" +
+                "  \"mydatenano\" : \"2020-05-15T06:50:01.45678\",\n" +
+                "  \"myboolean\" : true,\n" +
+                "  \"mybinary\" : \"U29tZSBiaW5hcnkgYmxvYg==\",\n" +
+                "  \"mynested\" : {\n" +
+                "    \"l1long\" : 357345987,\n" +
+                "    \"l1date\" : \"2020-05-15T06:57:44.123\",\n" +
+                "    \"l1nested\" : {\n" +
+                "      \"l2short\" : [\n" +
+                "        1,\n" +
+                "        2,\n" +
+                "        3,\n" +
+                "        4,\n" +
+                "        5,\n" +
+                "        6,\n" +
+                "        7,\n" +
+                "        8,\n" +
+                "        9,\n" +
+                "        10\n" +
+                "      ],\n" +
+                "      \"l2binary\" : \"U29tZSBiaW5hcnkgYmxvYg==\"\n" +
+                "    }\n" +
+                "  },\n" +
+                "  \"objlistouter\": []" +
+                "}\n", HashMap.class);
+    }
+
     @After
     public void after()
     {
@@ -480,5 +530,106 @@ public class ElasticsearchRecordHandlerTest
                 .withSplitId(UUID.randomUUID().toString())
                 .withIsDirectory(true)
                 .build();
+    }
+
+    @Test
+    public void readWithConstraint_whenQueryNotRunning_returnsEarly()
+            throws Exception
+    {
+        logger.info("readWithConstraint_whenQueryNotRunning_returnsEarly - enter");
+
+        com.amazonaws.athena.connector.lambda.QueryStatusChecker queryStatusChecker =
+                mock(com.amazonaws.athena.connector.lambda.QueryStatusChecker.class);
+        when(queryStatusChecker.isQueryRunning()).thenReturn(false);
+
+        ReadRecordsRequest request = new ReadRecordsRequest(fakeIdentity(),
+                "elasticsearch",
+                "queryId-" + System.currentTimeMillis(),
+                new TableName("movies", "mishmash"),
+                mapping,
+                split,
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        handler = new ElasticsearchRecordHandler(amazonS3, awsSecretsManager, athena, clientFactory, 720, 60, ImmutableMap.of());
+
+        // Use reflection to call readWithConstraint
+        try {
+            java.lang.reflect.Method method = ElasticsearchRecordHandler.class.getDeclaredMethod("readWithConstraint",
+                    com.amazonaws.athena.connector.lambda.data.BlockSpiller.class,
+                    ReadRecordsRequest.class,
+                    com.amazonaws.athena.connector.lambda.QueryStatusChecker.class);
+            method.setAccessible(true);
+
+            com.amazonaws.athena.connector.lambda.data.BlockSpiller spiller =
+                    mock(com.amazonaws.athena.connector.lambda.data.BlockSpiller.class);
+
+            method.invoke(handler, spiller, request, queryStatusChecker);
+
+            // Verify no search was called when query is not running
+            verify(mockClient, org.mockito.Mockito.never()).search(any(), any());
+        }
+        catch (Exception e) {
+            fail("Failed to invoke readWithConstraint: " + e.getMessage());
+        }
+
+        logger.info("readWithConstraint_whenQueryNotRunning_returnsEarly - exit");
+    }
+
+    @Test
+    public void readWithConstraint_whenIOException_throwsAthenaConnectorException()
+            throws Exception
+    {
+        logger.info("readWithConstraint_whenIOException_throwsAthenaConnectorException - enter");
+
+        com.amazonaws.athena.connector.lambda.QueryStatusChecker queryStatusChecker =
+                mock(com.amazonaws.athena.connector.lambda.QueryStatusChecker.class);
+        when(queryStatusChecker.isQueryRunning()).thenReturn(true);
+
+        when(mockClient.search(any(), any())).thenThrow(new IOException("Search failed"));
+
+        handler = new ElasticsearchRecordHandler(amazonS3, awsSecretsManager, athena, clientFactory, 720, 60, ImmutableMap.of());
+
+        ReadRecordsRequest request = new ReadRecordsRequest(fakeIdentity(),
+                "elasticsearch",
+                "queryId-" + System.currentTimeMillis(),
+                new TableName("movies", "mishmash"),
+                mapping,
+                split,
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchRecordHandler.class.getDeclaredMethod("readWithConstraint",
+                    com.amazonaws.athena.connector.lambda.data.BlockSpiller.class,
+                    ReadRecordsRequest.class,
+                    com.amazonaws.athena.connector.lambda.QueryStatusChecker.class);
+            method.setAccessible(true);
+
+            com.amazonaws.athena.connector.lambda.data.BlockSpiller spiller =
+                    mock(com.amazonaws.athena.connector.lambda.data.BlockSpiller.class);
+
+            method.invoke(handler, spiller, request, queryStatusChecker);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException ex) {
+            assertTrue("Exception message should contain Error sending search query",
+                    ex.getMessage().contains("Error sending search query"));
+        }
+        catch (Exception e) {
+            if (e.getCause() instanceof com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException) {
+                com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException ex =
+                        (com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException) e.getCause();
+                assertTrue("Exception message should contain Error sending search query",
+                        ex.getMessage().contains("Error sending search query"));
+            }
+            else {
+                fail("Expected AthenaConnectorException but got: " + e.getClass().getName());
+            }
+        }
     }
 }
