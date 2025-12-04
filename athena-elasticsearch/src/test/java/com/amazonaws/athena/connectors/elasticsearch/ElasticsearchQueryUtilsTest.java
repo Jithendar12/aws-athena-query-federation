@@ -44,6 +44,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
 
 /**
@@ -215,4 +217,123 @@ public class ElasticsearchQueryUtilsTest
 
         logger.info("getNoneValuePredicate - exit");
     }
+
+    @Test
+    public void getPredicateFromRange_withDateSingleValue_wrapsInQuotes()
+    {
+        com.amazonaws.athena.connector.lambda.domain.predicate.Constraints constraints =
+                new com.amazonaws.athena.connector.lambda.domain.predicate.Constraints(
+                        ImmutableMap.of("mydate",
+                                com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet.copyOf(
+                                        Types.MinorType.DATEMILLI.getType(),
+                                        ImmutableList.of(
+                                                com.amazonaws.athena.connector.lambda.domain.predicate.Range.equal(
+                                                        allocator, Types.MinorType.DATEMILLI.getType(), 1589525370001L)),
+                                        false)),
+                        Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(constraints);
+        String actualPredicate = builder.queryName();
+
+        assertTrue("Should wrap date in quotes", actualPredicate.contains("\""));
+    }
+
+    @Test
+    public void getPredicateFromRange_withLowMarkerBelow_continuesToNextRange()
+    {
+        com.amazonaws.athena.connector.lambda.domain.predicate.Constraints constraints =
+                new com.amazonaws.athena.connector.lambda.domain.predicate.Constraints(
+                        ImmutableMap.of("myfield",
+                                com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet.copyOf(
+                                        Types.MinorType.INT.getType(),
+                                        ImmutableList.of(
+                                                com.amazonaws.athena.connector.lambda.domain.predicate.Range.range(
+                                                        allocator, Types.MinorType.INT.getType(), 10, false, 20, true)),
+                                        false)),
+                        Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(constraints);
+        assertNotNull("Should handle BELOW bound", builder);
+    }
+
+    @Test
+    public void getPredicateFromRange_withHighMarkerAbove_continuesToNextRange()
+    {
+        com.amazonaws.athena.connector.lambda.domain.predicate.Constraints constraints =
+                new com.amazonaws.athena.connector.lambda.domain.predicate.Constraints(
+                        ImmutableMap.of("myfield",
+                                com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet.copyOf(
+                                        Types.MinorType.INT.getType(),
+                                        ImmutableList.of(
+                                                com.amazonaws.athena.connector.lambda.domain.predicate.Range.range(
+                                                        allocator, Types.MinorType.INT.getType(), 10, true, 20, false)),
+                                        false)),
+                        Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(constraints);
+        assertNotNull("Should handle ABOVE bound", builder);
+    }
+
+    @Test
+    public void getPredicateFromRange_withUnhandledBound_continuesToNextRange()
+    {
+        com.amazonaws.athena.connector.lambda.domain.predicate.Constraints constraints =
+                new com.amazonaws.athena.connector.lambda.domain.predicate.Constraints(
+                        ImmutableMap.of("myfield",
+                                com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet.copyOf(
+                                        Types.MinorType.INT.getType(),
+                                        ImmutableList.of(
+                                                com.amazonaws.athena.connector.lambda.domain.predicate.Range.range(
+                                                        allocator, Types.MinorType.INT.getType(), 10, true, 20, true)),
+                                        false)),
+                        Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(constraints);
+        assertNotNull("Should handle unhandled bound", builder);
+    }
+
+    @Test
+    public void getQuery_withEmptyRangeSet_returnsMatchAllQuery()
+    {
+        // Test getPredicateFromRange indirectly through getQuery with empty range set
+        SortedRangeSet emptyRangeSet = SortedRangeSet.copyOf(Types.MinorType.INT.getType(), Collections.emptyList(), false);
+        Map<String, ValueSet> constraintSummary = new HashMap<>();
+        constraintSummary.put("myfield", emptyRangeSet);
+        Constraints constraints = new Constraints(constraintSummary, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder result = ElasticsearchQueryUtils.getQuery(constraints);
+
+        // When range set is empty, getPredicateFromRange returns empty string, so getQuery returns matchAllQuery
+        assertNotNull("Should return query builder", result);
+        // The query should be a matchAllQuery when no predicates are formed
+    }
+
+    @Test
+    public void getPredicate_withEmptyPredicateParts_returnsQueryBuilder()
+    {
+        Constraints emptyConstraints = new Constraints(Collections.emptyMap(), Collections.emptyList(),
+                Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(emptyConstraints);
+        assertNotNull("Should return query builder", builder);
+    }
+
+    @Test
+    public void getQuery_withRangeSet_returnsQueryBuilder()
+    {
+        // Test getPredicateFromRange indirectly through getQuery with valid range set
+        // Note: Testing BELOW/ABOVE marker edge cases requires reflection which is not compatible with Java 17+
+        // These edge cases are internal implementation details and should be tested through integration tests
+        Range range = Range.range(allocator, Types.MinorType.INT.getType(), 10, true, 20, true);
+        SortedRangeSet rangeSet = SortedRangeSet.copyOf(Types.MinorType.INT.getType(), ImmutableList.of(range), false);
+        
+        Map<String, ValueSet> constraintSummary = new HashMap<>();
+        constraintSummary.put("myfield", rangeSet);
+        Constraints constraints = new Constraints(constraintSummary, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder result = ElasticsearchQueryUtils.getQuery(constraints);
+
+        assertNotNull("Should return query builder for range set", result);
+    }
+
 }

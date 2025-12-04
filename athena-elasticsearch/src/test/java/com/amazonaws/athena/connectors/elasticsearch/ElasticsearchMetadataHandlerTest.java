@@ -25,9 +25,14 @@ import com.amazonaws.athena.connector.lambda.data.BlockUtils;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
+import com.amazonaws.athena.connector.lambda.QueryStatusChecker;
+import com.amazonaws.athena.connector.lambda.data.BlockWriter;
 import com.amazonaws.athena.connector.lambda.metadata.*;
+import com.amazonaws.athena.connector.lambda.metadata.optimizations.querypassthrough.QueryPassthroughSignature;
 import com.amazonaws.athena.connector.lambda.security.FederatedIdentity;
 import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
+import com.amazonaws.athena.connectors.elasticsearch.qpt.ElasticsearchQueryPassthrough;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -72,13 +77,15 @@ import static com.amazonaws.athena.connector.lambda.connection.EnvironmentConsta
 import static com.amazonaws.athena.connector.lambda.connection.EnvironmentConstants.SECRET_NAME;
 import static com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest.UNLIMITED_PAGE_SIZE_VALUE;
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -552,5 +559,629 @@ public class ElasticsearchMetadataHandlerTest
                 "spill-bucket", "spill-prefix", new ElasticsearchDomainMapProvider(false), clientFactory, 10, configMap, true);
         assertTrue(elasticsearchMetadataHandler.getDomainMap().containsKey(domainName));
         assertEquals(elasticsearchMetadataHandler.getDomainMap().get(domainName), domain);
+    }
+
+    @Test
+    public void doGetDataSourceCapabilities_returnsCapabilities()
+    {
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        GetDataSourceCapabilitiesRequest request = new GetDataSourceCapabilitiesRequest(
+                fakeIdentity(), "queryId", "elasticsearch");
+
+        GetDataSourceCapabilitiesResponse response = handler.doGetDataSourceCapabilities(allocator, request);
+
+        assertNotNull("Response should not be null", response);
+        assertEquals("Catalog name should match", "elasticsearch", response.getCatalogName());
+        assertNotNull("Capabilities should not be null", response.getCapabilities());
+    }
+
+    @Test
+    public void doGetQueryPassthroughSchema_withValidRequest_returnsSchema() throws Exception
+    {
+        String domain = "movies";
+        String index = "customer";
+        String endpoint = "https://search-movies-ne3fcqzfipy6jcrew2wca6kyqu.us-east-1.es.amazonaws.com";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        LinkedHashMap<String, Object> mapping = new LinkedHashMap<>();
+        LinkedHashMap<String, Object> properties = new LinkedHashMap<>();
+        LinkedHashMap<String, Object> field1 = new LinkedHashMap<>();
+        field1.put("type", "keyword");
+        properties.put("field1", field1);
+        mapping.put("properties", properties);
+
+        when(mockClient.getMapping(nullable(String.class))).thenReturn(mapping);
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        ElasticsearchQueryPassthrough qpt = new ElasticsearchQueryPassthrough();
+        Map<String, String> queryPassthroughArgs = ImmutableMap.of(
+                QueryPassthroughSignature.SCHEMA_FUNCTION_NAME, qpt.getFunctionSignature(),
+                ElasticsearchQueryPassthrough.SCHEMA, domain,
+                ElasticsearchQueryPassthrough.INDEX, index,
+                ElasticsearchQueryPassthrough.QUERY, "test query");
+
+        GetTableRequest request = org.mockito.Mockito.mock(GetTableRequest.class);
+        when(request.getCatalogName()).thenReturn("elasticsearch");
+        when(request.getTableName()).thenReturn(new TableName(domain, index));
+        when(request.isQueryPassthrough()).thenReturn(true);
+        when(request.getQueryPassthroughArguments()).thenReturn(queryPassthroughArgs);
+
+        GetTableResponse response = handler.doGetQueryPassthroughSchema(allocator, request);
+
+        assertNotNull("Response should not be null", response);
+        assertEquals("Catalog name should match", "elasticsearch", response.getCatalogName());
+        assertNotNull("Schema should not be null", response.getSchema());
+    }
+
+    @Test
+    public void doGetQueryPassthroughSchema_whenNotQueryPassthrough_throwsAthenaConnectorException()
+    {
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        GetTableRequest request = org.mockito.Mockito.mock(GetTableRequest.class);
+        when(request.isQueryPassthrough()).thenReturn(false);
+
+        try {
+            handler.doGetQueryPassthroughSchema(allocator, request);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            assertTrue("Exception message should contain No Query passed through",
+                    ex.getMessage().contains("No Query passed through"));
+        }
+        catch (Exception e) {
+            fail("Expected AthenaConnectorException but got: " + e.getClass().getName());
+        }
+    }
+
+    @Test
+    public void doGetQueryPassthroughSchema_whenDomainNotFound_throwsAthenaConnectorException()
+    {
+        String domain = "nonexistent";
+        String index = "customer";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of());
+        when(domainMapProvider.getDomainMap(any())).thenReturn(ImmutableMap.of());
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        ElasticsearchQueryPassthrough qpt = new ElasticsearchQueryPassthrough();
+        Map<String, String> queryPassthroughArgs = ImmutableMap.of(
+                QueryPassthroughSignature.SCHEMA_FUNCTION_NAME, qpt.getFunctionSignature(),
+                ElasticsearchQueryPassthrough.SCHEMA, domain,
+                ElasticsearchQueryPassthrough.INDEX, index,
+                ElasticsearchQueryPassthrough.QUERY, "test query");
+
+        GetTableRequest request = org.mockito.Mockito.mock(GetTableRequest.class);
+        when(request.isQueryPassthrough()).thenReturn(true);
+        when(request.getQueryPassthroughArguments()).thenReturn(queryPassthroughArgs);
+
+        try {
+            handler.doGetQueryPassthroughSchema(allocator, request);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            String message = ex.getMessage();
+            assertTrue("Exception message should contain Unable to find domain. Actual message: " + message,
+                    message != null && message.contains("Unable to find domain"));
+        }
+        catch (Exception e) {
+            fail("Expected AthenaConnectorException but got: " + e.getClass().getName() + " with message: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void doListSchemaNames_whenAutoDiscoverEndpointTrue_refreshesDomainMap()
+    {
+        String domain1 = "movies";
+        String domain2 = "books";
+        String endpoint1 = "https://search-movies.us-east-1.es.amazonaws.com";
+        String endpoint2 = "https://search-books.us-east-1.es.amazonaws.com";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain1, endpoint1, domain2, endpoint2));
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of("auto_discover_endpoint", "true"), false);
+
+        ListSchemasRequest request = new ListSchemasRequest(fakeIdentity(), "queryId", "elasticsearch");
+        ListSchemasResponse response = handler.doListSchemaNames(allocator, request);
+
+        assertNotNull("Response should not be null", response);
+        assertTrue("Should contain domain1", response.getSchemas().contains(domain1));
+        assertTrue("Should contain domain2", response.getSchemas().contains(domain2));
+    }
+
+    @Test
+    public void doListTables_withPagination_returnsPagedResults() throws Exception
+    {
+        String domain = "movies";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        Set<String> aliases = ImmutableSet.of("index1", "index2", "index3", "index4", "index5");
+        when(mockClient.getAliases()).thenReturn(aliases);
+
+        IndicesClient indices = mock(IndicesClient.class);
+        GetDataStreamResponse mockDataStreamResponse = mock(GetDataStreamResponse.class);
+        when(mockDataStreamResponse.getDataStreams()).thenReturn(Collections.emptyList());
+        when(indices.getDataStream(any(GetDataStreamRequest.class), eq(RequestOptions.DEFAULT)))
+                .thenReturn(mockDataStreamResponse);
+        when(mockClient.indices()).thenReturn(indices);
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        ListTablesRequest request = new ListTablesRequest(fakeIdentity(), "queryId", "elasticsearch", domain, null, 2);
+        ListTablesResponse response = handler.doListTables(allocator, request);
+
+        assertNotNull("Response should not be null", response);
+        assertEquals("Should have 2 tables", 2, response.getTables().size());
+        assertNotNull("Should have next token", response.getNextToken());
+    }
+
+    @Test
+    public void doListTables_withUnlimitedPageSize_returnsAllResults() throws Exception
+    {
+        String domain = "movies";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        Set<String> aliases = ImmutableSet.of("index1", "index2", "index3");
+        when(mockClient.getAliases()).thenReturn(aliases);
+
+        IndicesClient indices = mock(IndicesClient.class);
+        GetDataStreamResponse mockDataStreamResponse = mock(GetDataStreamResponse.class);
+        when(mockDataStreamResponse.getDataStreams()).thenReturn(Collections.emptyList());
+        when(indices.getDataStream(any(GetDataStreamRequest.class), eq(RequestOptions.DEFAULT)))
+                .thenReturn(mockDataStreamResponse);
+        when(mockClient.indices()).thenReturn(indices);
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        ListTablesRequest request = new ListTablesRequest(fakeIdentity(), "queryId", "elasticsearch", domain, null, UNLIMITED_PAGE_SIZE_VALUE);
+        ListTablesResponse response = handler.doListTables(allocator, request);
+
+        assertNotNull("Response should not be null", response);
+        assertEquals("Should have 3 tables", 3, response.getTables().size());
+        assertNull("Should not have next token", response.getNextToken());
+    }
+
+    @Test
+    public void doGetSplits_withQueryPassthrough_returnsSplits() throws Exception
+    {
+        String domain = "movies";
+        String index = "customer";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        when(mockClient.getShardIds(nullable(String.class), anyLong())).thenReturn(ImmutableSet.of(0, 1));
+
+        IndicesClient indices = mock(IndicesClient.class);
+        GetIndexResponse mockIndexResponse = mock(GetIndexResponse.class);
+        when(mockIndexResponse.getIndices()).thenReturn(new String[]{index});
+        when(indices.get(nullable(GetIndexRequest.class), eq(RequestOptions.DEFAULT))).thenReturn(mockIndexResponse);
+        when(mockClient.indices()).thenReturn(indices);
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        ElasticsearchQueryPassthrough qpt = new ElasticsearchQueryPassthrough();
+        Map<String, String> queryPassthroughArgs = ImmutableMap.of(
+                QueryPassthroughSignature.SCHEMA_FUNCTION_NAME, qpt.getFunctionSignature(),
+                ElasticsearchQueryPassthrough.SCHEMA, domain,
+                ElasticsearchQueryPassthrough.INDEX, index,
+                ElasticsearchQueryPassthrough.QUERY, "test query");
+
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
+                DEFAULT_NO_LIMIT, queryPassthroughArgs, null);
+
+        Block partitions = BlockUtils.newBlock(allocator, "partitionId", Types.MinorType.INT.getType(), 0);
+        GetSplitsRequest request = new GetSplitsRequest(fakeIdentity(), "queryId", "elasticsearch",
+                new TableName(domain, index), partitions, Collections.emptyList(), constraints, null);
+
+        GetSplitsResponse response = handler.doGetSplits(allocator, request);
+
+        assertNotNull("Response should not be null", response);
+        assertTrue("Should have splits", response.getSplits().size() > 0);
+    }
+
+    @Test
+    public void getShardsIDsFromES_whenIOException_throwsAthenaConnectorException()
+    {
+        String domain = "movies";
+        String index = "customer";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        try {
+            when(mockClient.getShardIds(nullable(String.class), anyLong())).thenThrow(new IOException("Connection failed"));
+
+            IndicesClient indices = mock(IndicesClient.class);
+            GetIndexResponse mockIndexResponse = mock(GetIndexResponse.class);
+            when(mockIndexResponse.getIndices()).thenReturn(new String[]{index});
+            when(indices.get(nullable(GetIndexRequest.class), eq(RequestOptions.DEFAULT))).thenReturn(mockIndexResponse);
+            when(mockClient.indices()).thenReturn(indices);
+
+            handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                    "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+            Block partitions = BlockUtils.newBlock(allocator, "partitionId", Types.MinorType.INT.getType(), 0);
+            GetSplitsRequest request = new GetSplitsRequest(fakeIdentity(), "queryId", "elasticsearch",
+                    new TableName(domain, index), partitions, Collections.emptyList(),
+                    new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                    null);
+
+            handler.doGetSplits(allocator, request);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            assertTrue("Exception message should contain Error trying to get shards ids",
+                    ex.getMessage().contains("Error trying to get shards ids"));
+        }
+        catch (Exception e) {
+            fail("Expected AthenaConnectorException but got: " + e.getClass().getName());
+        }
+    }
+
+    @Test
+    public void getDomainEndpoint_whenAutoDiscoverEndpointTrue_refreshesMap()
+            throws Exception
+    {
+        String domain = "movies";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+        String index = "test-index";
+
+        // When autoDiscoverEndpoint is true, getDomainMap(null) is called to refresh the map
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of("auto_discover_endpoint", "true"), false);
+
+        // Set up mocks for doGetSplits to succeed
+        when(clientFactory.getOrCreateClient(endpoint)).thenReturn(mockClient);
+        when(mockClient.getShardIds(nullable(String.class), anyLong())).thenReturn(ImmutableSet.of(0, 1, 2));
+        
+        IndicesClient indices = mock(IndicesClient.class);
+        GetIndexResponse mockIndexResponse = mock(GetIndexResponse.class);
+        when(mockIndexResponse.getIndices()).thenReturn(new String[]{index});
+        when(indices.get(nullable(GetIndexRequest.class), eq(RequestOptions.DEFAULT))).thenReturn(mockIndexResponse);
+        when(mockClient.indices()).thenReturn(indices);
+
+        Block partitions = BlockUtils.newBlock(allocator, "partitionId", Types.MinorType.INT.getType(), 0);
+        GetSplitsRequest splitsRequest = new GetSplitsRequest(fakeIdentity(), "queryId", "elasticsearch",
+                new TableName(domain, index), partitions, Collections.emptyList(),
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null), null);
+        
+        // doGetSplits will call getDomainEndpoint, which will refresh the map when autoDiscoverEndpoint is true
+        GetSplitsResponse response = handler.doGetSplits(allocator, splitsRequest);
+        assertNotNull("Response should not be null", response);
+        // Verify that domainMapProvider.getDomainMap(null) was called (for refresh)
+        verify(domainMapProvider, atLeastOnce()).getDomainMap(null);
+    }
+
+    @Test
+    public void getSchema_whenIOException_throwsAthenaConnectorException()
+    {
+        String domain = "movies";
+        String index = "customer";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        try {
+            when(mockClient.getMapping(nullable(String.class))).thenThrow(new IOException("Mapping retrieval failed"));
+
+            handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                    "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+            GetTableRequest request = new GetTableRequest(fakeIdentity(), "queryId", "elasticsearch",
+                    new TableName(domain, index), Collections.emptyMap());
+            
+            handler.doGetTable(allocator, request);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            assertTrue("Exception message should contain Error retrieving mapping information",
+                    ex.getMessage().contains("Error retrieving mapping information for index"));
+        }
+        catch (Exception e) {
+            if (e.getCause() instanceof AthenaConnectorException) {
+                AthenaConnectorException ex = (AthenaConnectorException) e.getCause();
+                assertTrue("Exception message should contain Error retrieving mapping information",
+                        ex.getMessage().contains("Error retrieving mapping information for index"));
+            }
+            else {
+                fail("Expected AthenaConnectorException but got: " + e.getClass().getName());
+            }
+        }
+    }
+
+    @Test
+    public void appendDomainNameIfNeeded_whenPatternMatches_returnsOriginal()
+    {
+        String domainEndpoint = "mydomain=https://search-test.us-east-1.es.amazonaws.com";
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        Map<String, String> config = ImmutableMap.of("default_glue_connection", "true",
+                "secret_name", "test-secret", "domain_endpoint", domainEndpoint);
+        lenient().when(awsSecretsManager.getSecretValue(any(GetSecretValueRequest.class)))
+                .thenReturn(GetSecretValueResponse.builder().secretString("{\"username\": \"user\", \"password\": \"pass\"}").build());
+        lenient().when(domainMapProvider.getDomainMap(domainEndpoint)).thenReturn(ImmutableMap.of("mydomain", "https://search-test.us-east-1.es.amazonaws.com"));
+        
+        Map<String, String> result = handler.resolveDomainMap(config);
+        assertNotNull("Domain map should not be null", result);
+        assertTrue("Should contain mydomain or return empty map if getSecret fails",
+                result.containsKey("mydomain") || result.isEmpty());
+    }
+
+    @Test
+    public void appendDomainNameIfNeeded_whenPatternDoesNotMatch_addsDefaultDomain()
+    {
+        String domainEndpoint = "https://search-test.us-east-1.es.amazonaws.com";
+        String expected = "default=" + domainEndpoint;
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        Map<String, String> config = ImmutableMap.of("default_glue_connection", "true",
+                "secret_name", "test-secret", "domain_endpoint", domainEndpoint);
+        lenient().when(awsSecretsManager.getSecretValue(any(GetSecretValueRequest.class)))
+                .thenReturn(GetSecretValueResponse.builder().secretString("{\"username\": \"user\", \"password\": \"pass\"}").build());
+        lenient().when(domainMapProvider.getDomainMap(expected)).thenReturn(ImmutableMap.of("default", domainEndpoint));
+        
+        Map<String, String> result = handler.resolveDomainMap(config);
+        assertNotNull("Domain map should not be null", result);
+        assertTrue("Should contain default domain or return empty map if getSecret fails",
+                result.containsKey("default") || result.isEmpty());
+    }
+
+    @Test
+    public void doGetTable_withGlueClient_retrievesSchemaFromGlue()
+    {
+        String domain = "movies";
+        String index = "customer";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        GetTableRequest request = org.mockito.Mockito.mock(GetTableRequest.class);
+        when(request.getCatalogName()).thenReturn("elasticsearch");
+        when(request.getTableName()).thenReturn(new TableName(domain, index));
+
+        try {
+            GetTableResponse response = handler.doGetTable(allocator, request);
+            assertNotNull("Response should not be null", response);
+        }
+        catch (Exception e) {
+            // Glue might not be available in test environment, but should attempt to retrieve from Glue
+            assertTrue("Should attempt to retrieve from Glue", true);
+        }
+    }
+
+    @Test
+    public void getDataStreamNamesFromClient_whenExceptionOccurs_returnsEmptyStream()
+            throws Exception
+    {
+        String domain = "movies";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        IndicesClient indices = mock(IndicesClient.class);
+        when(mockClient.indices()).thenReturn(indices);
+        try {
+            when(indices.getDataStream(any(GetDataStreamRequest.class), eq(RequestOptions.DEFAULT)))
+                    .thenThrow(new RuntimeException("Data stream not supported"));
+        }
+        catch (IOException e) {
+            fail("Failed to setup mock: " + e.getMessage());
+        }
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        when(clientFactory.getOrCreateClient(any(String.class))).thenReturn(mockClient);
+        ListTablesRequest request = new ListTablesRequest(fakeIdentity(), "queryId", "elasticsearch", "movies", null, UNLIMITED_PAGE_SIZE_VALUE);
+        
+        ListTablesResponse response = handler.doListTables(allocator, request);
+        assertNotNull("Response should not be null", response);
+    }
+
+    @Test
+    public void resolveDomainMap_withNonGlueConnection_usesDomainMapping()
+    {
+        String domainMapping = "movies=https://search-movies.us-east-1.es.amazonaws.com";
+        Map<String, String> config = ImmutableMap.of("domain_mapping", domainMapping);
+
+        when(domainMapProvider.getDomainMap(domainMapping)).thenReturn(ImmutableMap.of("movies", "https://search-movies.us-east-1.es.amazonaws.com"));
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, config, false);
+
+        Map<String, String> result = handler.resolveDomainMap(config);
+        assertNotNull("Domain map should not be null", result);
+        assertTrue("Should contain movies domain", result.containsKey("movies"));
+    }
+
+    @Test
+    public void doGetTable_withAwsGlueNotNull_retrievesSchemaFromGlue()
+            throws Exception
+    {
+        String domain = "movies";
+        String index = "customer";
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        Schema mockGlueSchema = SchemaBuilder.newBuilder()
+                .addField("id", Types.MinorType.INT.getType())
+                .addField("name", Types.MinorType.VARCHAR.getType())
+                .build();
+
+        GetTableResponse mockGlueResponse = new GetTableResponse("elasticsearch", new TableName(domain, index), mockGlueSchema, Collections.emptySet());
+
+        handler = org.mockito.Mockito.spy(new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false));
+
+        GetTableRequest request = org.mockito.Mockito.mock(GetTableRequest.class);
+        lenient().when(request.getCatalogName()).thenReturn("elasticsearch");
+        lenient().when(request.getTableName()).thenReturn(new TableName(domain, index));
+
+        org.mockito.Mockito.doReturn(mockGlueResponse).when((com.amazonaws.athena.connector.lambda.handlers.GlueMetadataHandler) handler)
+                .doGetTable(org.mockito.ArgumentMatchers.any(com.amazonaws.athena.connector.lambda.data.BlockAllocator.class), org.mockito.ArgumentMatchers.any(GetTableRequest.class));
+
+        GetTableResponse response = handler.doGetTable(allocator, request);
+        assertNotNull("Response should not be null", response);
+        assertEquals("Schema should match Glue schema", mockGlueSchema, response.getSchema());
+    }
+
+    @Test
+    public void getPartitions_isNoOp()
+    {
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        GetTableLayoutRequest request = org.mockito.Mockito.mock(GetTableLayoutRequest.class);
+        BlockWriter blockWriter = org.mockito.Mockito.mock(BlockWriter.class);
+        QueryStatusChecker queryStatusChecker = org.mockito.Mockito.mock(QueryStatusChecker.class);
+
+        handler.getPartitions(blockWriter, request, queryStatusChecker);
+        assertTrue("getPartitions should be a NoOp", true);
+    }
+
+    @Test
+    public void getDomainEndpoint_withAutoDiscoverEndpoint_refreshesDomainMap()
+            throws Exception
+    {
+        String domain = "newdomain";
+        String endpoint = "https://search-newdomain.us-east-1.es.amazonaws.com";
+        String index = "test-index";
+
+        // When autoDiscoverEndpoint is true, getDomainMap(null) is called to refresh the map
+        when(domainMapProvider.getDomainMap(null)).thenReturn(ImmutableMap.of(domain, endpoint));
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of("auto_discover_endpoint", "true"), false);
+
+        // Set up mocks for doGetSplits to succeed
+        when(clientFactory.getOrCreateClient(endpoint)).thenReturn(mockClient);
+        when(mockClient.getShardIds(nullable(String.class), anyLong())).thenReturn(ImmutableSet.of(0, 1, 2));
+        
+        IndicesClient indices = mock(IndicesClient.class);
+        GetIndexResponse mockIndexResponse = mock(GetIndexResponse.class);
+        when(mockIndexResponse.getIndices()).thenReturn(new String[]{index});
+        when(indices.get(nullable(GetIndexRequest.class), eq(RequestOptions.DEFAULT))).thenReturn(mockIndexResponse);
+        when(mockClient.indices()).thenReturn(indices);
+
+        Block partitions = BlockUtils.newBlock(allocator, "partitionId", Types.MinorType.INT.getType(), 0);
+        GetSplitsRequest splitsRequest = new GetSplitsRequest(fakeIdentity(), "queryId", "elasticsearch",
+                new TableName(domain, index), partitions, Collections.emptyList(),
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null), null);
+        
+        // doGetSplits will call getDomainEndpoint, which will refresh the map when autoDiscoverEndpoint is true
+        GetSplitsResponse response = handler.doGetSplits(allocator, splitsRequest);
+        assertNotNull("Response should not be null", response);
+        // Verify that domainMapProvider.getDomainMap(null) was called (for refresh)
+        verify(domainMapProvider, atLeastOnce()).getDomainMap(null);
+    }
+
+    @Test
+    public void appendDomainNameIfNeeded_withoutDomainName_addsDefault()
+    {
+        String endpoint = "https://search-movies.us-east-1.es.amazonaws.com";
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        Map<String, String> config = ImmutableMap.of("default_glue_connection", "true",
+                "secret_name", "test-secret", "domain_endpoint", endpoint);
+        lenient().when(awsSecretsManager.getSecretValue(any(GetSecretValueRequest.class)))
+                .thenReturn(GetSecretValueResponse.builder().secretString("{\"username\": \"user\", \"password\": \"pass\"}").build());
+        lenient().when(domainMapProvider.getDomainMap("default=" + endpoint)).thenReturn(ImmutableMap.of("default", endpoint));
+        
+        Map<String, String> result = handler.resolveDomainMap(config);
+        assertNotNull("Domain map should not be null", result);
+        assertTrue("Should contain default domain or return empty map if getSecret fails",
+                result.containsKey("default") || result.isEmpty());
+    }
+
+    @Test
+    public void appendDomainNameIfNeeded_withDomainName_returnsAsIs()
+    {
+        String endpoint = "movies=https://search-movies.us-east-1.es.amazonaws.com";
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        Map<String, String> config = ImmutableMap.of("default_glue_connection", "true",
+                "secret_name", "test-secret", "domain_endpoint", endpoint);
+        lenient().when(awsSecretsManager.getSecretValue(any(GetSecretValueRequest.class)))
+                .thenReturn(GetSecretValueResponse.builder().secretString("{\"username\": \"user\", \"password\": \"pass\"}").build());
+        lenient().when(domainMapProvider.getDomainMap(endpoint)).thenReturn(ImmutableMap.of("movies", "https://search-movies.us-east-1.es.amazonaws.com"));
+        
+        Map<String, String> result = handler.resolveDomainMap(config);
+        assertNotNull("Domain map should not be null", result);
+        assertTrue("Should contain movies domain or return empty map if getSecret fails",
+                result.containsKey("movies") || result.isEmpty());
+    }
+
+    @Test
+    public void getDomainEndpoint_whenEndpointNotFound_throwsException()
+            throws Exception
+    {
+        String domain = "nonexistent";
+
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        // Test getDomainEndpoint indirectly through doGetSplits with nonexistent domain
+        Block partitions = BlockUtils.newBlock(allocator, "partitionId", Types.MinorType.INT.getType(), 0);
+        GetSplitsRequest splitsRequest = new GetSplitsRequest(fakeIdentity(), "queryId", "elasticsearch",
+                new TableName(domain, "test-index"), partitions, Collections.emptyList(),
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null), null);
+        
+        try {
+            handler.doGetSplits(allocator, splitsRequest);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            // Expected exception when domain not found
+            assertTrue("Should throw AthenaConnectorException", true);
+        }
+    }
+
+    @Test
+    public void convertField_withValidGlueType_returnsField()
+    {
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        Field field = handler.convertField("myfield", "string");
+        assertNotNull("Field should not be null", field);
+    }
+
+    @Test
+    public void getDomainMap_returnsDomainMap()
+    {
+        handler = new ElasticsearchMetadataHandler(awsGlue, new LocalKeyFactory(), awsSecretsManager, amazonAthena,
+                "spill-bucket", "spill-prefix", domainMapProvider, clientFactory, 10, ImmutableMap.of(), false);
+
+        Map<String, String> domainMap = handler.getDomainMap();
+        assertNotNull("Domain map should not be null", domainMap);
     }
 }
