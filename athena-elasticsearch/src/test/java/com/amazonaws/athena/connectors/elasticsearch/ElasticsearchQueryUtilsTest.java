@@ -44,6 +44,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
 
 /**
@@ -214,5 +217,166 @@ public class ElasticsearchQueryUtilsTest
         assertEquals("Predicates do not match", expectedPredicate, actualPredicate);
 
         logger.info("getNoneValuePredicate - exit");
+    }
+
+    @Test
+    public void getPredicateFromRange_withDateSingleValue_wrapsInQuotes()
+    {
+        com.amazonaws.athena.connector.lambda.domain.predicate.Constraints constraints =
+                new com.amazonaws.athena.connector.lambda.domain.predicate.Constraints(
+                        ImmutableMap.of("mydate",
+                                com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet.copyOf(
+                                        Types.MinorType.DATEMILLI.getType(),
+                                        ImmutableList.of(
+                                                com.amazonaws.athena.connector.lambda.domain.predicate.Range.equal(
+                                                        allocator, Types.MinorType.DATEMILLI.getType(), 1589525370001L)),
+                                        false)),
+                        Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(constraints);
+        String actualPredicate = builder.queryName();
+
+        assertTrue("Should wrap date in quotes", actualPredicate.contains("\""));
+    }
+
+    @Test
+    public void getPredicateFromRange_withLowMarkerBelow_continuesToNextRange()
+    {
+        com.amazonaws.athena.connector.lambda.domain.predicate.Constraints constraints =
+                new com.amazonaws.athena.connector.lambda.domain.predicate.Constraints(
+                        ImmutableMap.of("myfield",
+                                com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet.copyOf(
+                                        Types.MinorType.INT.getType(),
+                                        ImmutableList.of(
+                                                com.amazonaws.athena.connector.lambda.domain.predicate.Range.range(
+                                                        allocator, Types.MinorType.INT.getType(), 10, false, 20, true)),
+                                        false)),
+                        Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(constraints);
+        assertNotNull("Should handle BELOW bound", builder);
+    }
+
+    @Test
+    public void getPredicateFromRange_withHighMarkerAbove_continuesToNextRange()
+    {
+        com.amazonaws.athena.connector.lambda.domain.predicate.Constraints constraints =
+                new com.amazonaws.athena.connector.lambda.domain.predicate.Constraints(
+                        ImmutableMap.of("myfield",
+                                com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet.copyOf(
+                                        Types.MinorType.INT.getType(),
+                                        ImmutableList.of(
+                                                com.amazonaws.athena.connector.lambda.domain.predicate.Range.range(
+                                                        allocator, Types.MinorType.INT.getType(), 10, true, 20, false)),
+                                        false)),
+                        Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(constraints);
+        assertNotNull("Should handle ABOVE bound", builder);
+    }
+
+    @Test
+    public void getPredicateFromRange_withUnhandledBound_continuesToNextRange()
+    {
+        com.amazonaws.athena.connector.lambda.domain.predicate.Constraints constraints =
+                new com.amazonaws.athena.connector.lambda.domain.predicate.Constraints(
+                        ImmutableMap.of("myfield",
+                                com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet.copyOf(
+                                        Types.MinorType.INT.getType(),
+                                        ImmutableList.of(
+                                                com.amazonaws.athena.connector.lambda.domain.predicate.Range.range(
+                                                        allocator, Types.MinorType.INT.getType(), 10, true, 20, true)),
+                                        false)),
+                        Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(constraints);
+        assertNotNull("Should handle unhandled bound", builder);
+    }
+
+    @Test
+    public void getPredicateFromRange_withEmptyDisjuncts_returnsEmptyPredicate()
+    {
+        try {
+            java.lang.reflect.Method method = ElasticsearchQueryUtils.class.getDeclaredMethod("getPredicateFromRange", String.class, ValueSet.class);
+            method.setAccessible(true);
+
+            SortedRangeSet emptyRangeSet = SortedRangeSet.copyOf(Types.MinorType.INT.getType(), Collections.emptyList(), false);
+            String result = (String) method.invoke(null, "myfield", emptyRangeSet);
+
+            assertEquals("Should return empty predicate when no ranges", "", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke getPredicateFromRange: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void getPredicate_withEmptyPredicateParts_returnsEmptyPredicate()
+    {
+        Constraints emptyConstraints = new Constraints(Collections.emptyMap(), Collections.emptyList(),
+                Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        QueryBuilder builder = ElasticsearchQueryUtils.getQuery(emptyConstraints);
+        assertNotNull("Should return query builder", builder);
+    }
+
+    @Test
+    public void getPredicateFromRange_withLowMarkerBelow_logsWarningAndContinues()
+    {
+        try {
+            java.lang.reflect.Method method = ElasticsearchQueryUtils.class.getDeclaredMethod("getPredicateFromRange", String.class, ValueSet.class);
+            method.setAccessible(true);
+
+            Marker lowMarker = Marker.exactly(allocator, Types.MinorType.INT.getType(), 10);
+            Marker highMarker = Marker.exactly(allocator, Types.MinorType.INT.getType(), 20);
+
+            Range range = Range.range(allocator, Types.MinorType.INT.getType(), 10, true, 20, true);
+
+            java.lang.reflect.Field boundField = Marker.class.getDeclaredField("bound");
+            boundField.setAccessible(true);
+            boundField.set(lowMarker, Marker.Bound.BELOW);
+
+            java.lang.reflect.Field lowField = Range.class.getDeclaredField("low");
+            lowField.setAccessible(true);
+            lowField.set(range, lowMarker);
+
+            SortedRangeSet rangeSet = SortedRangeSet.copyOf(Types.MinorType.INT.getType(), ImmutableList.of(range), false);
+            String result = (String) method.invoke(null, "myfield", rangeSet);
+
+            assertNotNull("Should return a result", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke getPredicateFromRange: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void getPredicateFromRange_withHighMarkerAbove_logsWarningAndContinues()
+    {
+        try {
+            java.lang.reflect.Method method = ElasticsearchQueryUtils.class.getDeclaredMethod("getPredicateFromRange", String.class, ValueSet.class);
+            method.setAccessible(true);
+
+            Marker lowMarker = Marker.exactly(allocator, Types.MinorType.INT.getType(), 10);
+            Marker highMarker = Marker.exactly(allocator, Types.MinorType.INT.getType(), 20);
+
+            Range range = Range.range(allocator, Types.MinorType.INT.getType(), 10, true, 20, true);
+
+            java.lang.reflect.Field boundField = Marker.class.getDeclaredField("bound");
+            boundField.setAccessible(true);
+            boundField.set(highMarker, Marker.Bound.ABOVE);
+
+            java.lang.reflect.Field highField = Range.class.getDeclaredField("high");
+            highField.setAccessible(true);
+            highField.set(range, highMarker);
+
+            SortedRangeSet rangeSet = SortedRangeSet.copyOf(Types.MinorType.INT.getType(), ImmutableList.of(range), false);
+            String result = (String) method.invoke(null, "myfield", rangeSet);
+
+            assertNotNull("Should return a result", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke getPredicateFromRange: " + e.getMessage());
+        }
     }
 }

@@ -39,8 +39,12 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * This class is used to test the ElasticsearchSchemaUtils class.
@@ -346,5 +350,146 @@ public class ElasticsearchSchemaUtilsTest
         Schema builtSchema = ElasticsearchSchemaUtils.parseMapping(actual);
 
         logger.info("parseMappingWithInvalidMeta - exit");
+    }
+
+    @Test
+    public void toFieldType_withUnknownType_returnsNullType()
+    {
+        Map<String, Object> mapping = new LinkedHashMap<>();
+        mapping.put("type", "unknown_type");
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchSchemaUtils.class.getDeclaredMethod("toFieldType", Map.class);
+            method.setAccessible(true);
+            org.apache.arrow.vector.types.pojo.FieldType fieldType = (org.apache.arrow.vector.types.pojo.FieldType) method.invoke(null, mapping);
+            assertTrue("Should return NULL type for unknown type", Types.getMinorTypeForArrowType(fieldType.getType()) == Types.MinorType.NULL);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke toFieldType: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void mappingsEqual_withDifferentSizes_returnsFalse()
+    {
+        Schema schema1 = SchemaBuilder.newBuilder()
+                .addField("field1", Types.MinorType.VARCHAR.getType())
+                .build();
+        Schema schema2 = SchemaBuilder.newBuilder()
+                .addField("field1", Types.MinorType.VARCHAR.getType())
+                .addField("field2", Types.MinorType.INT.getType())
+                .build();
+
+        boolean result = ElasticsearchSchemaUtils.mappingsEqual(schema1, schema2);
+        assertFalse("Should return false for different sizes", result);
+    }
+
+    @Test
+    public void mappingsEqual_withDifferentFieldTypes_returnsFalse()
+    {
+        Schema schema1 = SchemaBuilder.newBuilder()
+                .addField("field1", Types.MinorType.VARCHAR.getType())
+                .build();
+        Schema schema2 = SchemaBuilder.newBuilder()
+                .addField("field1", Types.MinorType.INT.getType())
+                .build();
+
+        boolean result = ElasticsearchSchemaUtils.mappingsEqual(schema1, schema2);
+        assertFalse("Should return false for different field types", result);
+    }
+
+    @Test
+    public void mappingsEqual_withDifferentMetadata_returnsFalse()
+    {
+        Schema schema1 = SchemaBuilder.newBuilder()
+                .addField(new Field("field1", new FieldType(true, Types.MinorType.BIGINT.getType(), null,
+                        ImmutableMap.of("scaling_factor", "100")), null))
+                .build();
+        Schema schema2 = SchemaBuilder.newBuilder()
+                .addField(new Field("field1", new FieldType(true, Types.MinorType.BIGINT.getType(), null,
+                        ImmutableMap.of("scaling_factor", "200")), null))
+                .build();
+
+        boolean result = ElasticsearchSchemaUtils.mappingsEqual(schema1, schema2);
+        assertFalse("Should return false for different metadata", result);
+    }
+
+    @Test
+    public void childrenEqual_withDifferentSizes_returnsFalse()
+    {
+        List<Field> list1 = ImmutableList.of(
+                new Field("child1", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null));
+        List<Field> list2 = ImmutableList.of(
+                new Field("child1", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null),
+                new Field("child2", FieldType.nullable(Types.MinorType.INT.getType()), null));
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchSchemaUtils.class.getDeclaredMethod("childrenEqual", List.class, List.class);
+            method.setAccessible(true);
+            boolean result = (Boolean) method.invoke(null, list1, list2);
+            assertFalse("Should return false for different sizes", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke childrenEqual: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void childrenEqual_withNullField_returnsFalse()
+    {
+        List<Field> list1 = ImmutableList.of(
+                new Field("child1", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null));
+        List<Field> list2 = ImmutableList.of(
+                new Field("child2", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null));
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchSchemaUtils.class.getDeclaredMethod("childrenEqual", List.class, List.class);
+            method.setAccessible(true);
+            boolean result = (Boolean) method.invoke(null, list1, list2);
+            assertFalse("Should return false when field not found", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke childrenEqual: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void childrenEqual_withDifferentFieldTypes_returnsFalse()
+    {
+        List<Field> list1 = ImmutableList.of(
+                new Field("child1", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null));
+        List<Field> list2 = ImmutableList.of(
+                new Field("child1", FieldType.nullable(Types.MinorType.INT.getType()), null));
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchSchemaUtils.class.getDeclaredMethod("childrenEqual", List.class, List.class);
+            method.setAccessible(true);
+            boolean result = (Boolean) method.invoke(null, list1, list2);
+            assertFalse("Should return false for different field types", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke childrenEqual: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void childrenEqual_withDifferentMetadata_returnsFalse()
+    {
+        List<Field> list1 = ImmutableList.of(
+                new Field("child1", new FieldType(true, Types.MinorType.BIGINT.getType(), null,
+                        ImmutableMap.of("scaling_factor", "100")), null));
+        List<Field> list2 = ImmutableList.of(
+                new Field("child1", new FieldType(true, Types.MinorType.BIGINT.getType(), null,
+                        ImmutableMap.of("scaling_factor", "200")), null));
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchSchemaUtils.class.getDeclaredMethod("childrenEqual", List.class, List.class);
+            method.setAccessible(true);
+            boolean result = (Boolean) method.invoke(null, list1, list2);
+            assertFalse("Should return false for different metadata", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke childrenEqual: " + e.getMessage());
+        }
     }
 }

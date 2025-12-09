@@ -40,6 +40,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * This class is used to test the ElasticsearchFieldResolver class.
@@ -192,5 +195,105 @@ public class ElasticsearchFieldResolverTest
         assertEquals("Extracted values mismatch!", expectedResults, extractedResults);
 
         logger.info("getFieldValueTest - exit");
+    }
+
+    @Test
+    public void getFieldValue_withNonMapValue_throwsAthenaConnectorException()
+    {
+        Field field = new Field("test", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null);
+
+        try {
+            resolver.getFieldValue(field, "not-a-map");
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException ex) {
+            assertTrue("Exception message should contain Invalid argument type",
+                    ex.getMessage().contains("Invalid argument type"));
+        }
+        catch (Exception e) {
+            fail("Expected AthenaConnectorException but got: " + e.getClass().getName());
+        }
+    }
+
+    @Test
+    public void getFieldValue_withStructFieldAndNonMapValue_throwsAthenaConnectorException()
+    {
+        Field structField = new Field("mystruct", FieldType.nullable(Types.MinorType.STRUCT.getType()),
+                ImmutableList.of(new Field("nested", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null)));
+        Map<String, Object> document = ImmutableMap.of("mystruct", "not-a-map");
+
+        try {
+            resolver.getFieldValue(structField, document);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException ex) {
+            assertTrue("Exception message should contain Invalid field value",
+                    ex.getMessage().contains("Invalid field value encountered in Document"));
+        }
+        catch (Exception e) {
+            fail("Expected AthenaConnectorException but got: " + e.getClass().getName());
+        }
+    }
+
+    @Test
+    public void coerceListField_withUnsupportedFieldType_throwsAthenaConnectorException()
+    {
+        Field field = new Field("test", FieldType.nullable(Types.MinorType.INTERVALDAY.getType()), null);
+        Map<String, Object> document = ImmutableMap.of("test", ImmutableList.of("value"));
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchFieldResolver.class.getDeclaredMethod("coerceListField", Field.class, Object.class);
+            method.setAccessible(true);
+            method.invoke(resolver, field, document.get("test"));
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException ex) {
+            assertTrue("Exception message should contain Invalid field value",
+                    ex.getMessage().contains("Invalid field value encountered in Document"));
+        }
+        catch (Exception e) {
+            if (e.getCause() instanceof com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException) {
+                com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException ex =
+                        (com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException) e.getCause();
+                assertTrue("Exception message should contain Invalid field value",
+                        ex.getMessage().contains("Invalid field value encountered in Document"));
+            }
+            else {
+                fail("Expected AthenaConnectorException but got: " + e.getClass().getName());
+            }
+        }
+    }
+
+    @Test
+    public void coerceField_withListValueAndNonListFieldType_returnsFirstElement()
+    {
+        Field field = new Field("test", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null);
+        Map<String, Object> document = ImmutableMap.of("test", ImmutableList.of("value1", "value2"));
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchFieldResolver.class.getDeclaredMethod("coerceField", Field.class, Object.class);
+            method.setAccessible(true);
+            Object result = method.invoke(resolver, field, document.get("test"));
+            assertEquals("Should return first element of list", "value1", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke coerceField: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void coerceField_withDateMilliAndInvalidString_returnsNull()
+    {
+        Field field = new Field("test", FieldType.nullable(Types.MinorType.DATEMILLI.getType()), null);
+
+        try {
+            java.lang.reflect.Method method = ElasticsearchFieldResolver.class.getDeclaredMethod("coerceField", Field.class, Object.class);
+            method.setAccessible(true);
+            Object result = method.invoke(resolver, field, "invalid-date-format");
+            assertNull("Should return null for invalid date format", result);
+        }
+        catch (Exception e) {
+            fail("Failed to invoke coerceField: " + e.getMessage());
+        }
     }
 }
