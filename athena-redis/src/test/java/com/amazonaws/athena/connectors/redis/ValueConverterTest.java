@@ -46,7 +46,7 @@ public class ValueConverterTest
     }
 
     @Test
-    public void testBigIntConversion()
+    public void convert_withBigIntType_returnsLongValue()
     {
         Field field = mockField(new ArrowType.Int(64, true));
         Object result = ValueConverter.convert(field, "9223372036854775807");
@@ -54,7 +54,7 @@ public class ValueConverterTest
     }
 
     @Test
-    public void testFloat4Conversion()
+    public void convert_withFloat4Type_returnsFloatValue()
     {
         Field field = mockField(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE));
         Object result = ValueConverter.convert(field, "3.14");
@@ -62,7 +62,7 @@ public class ValueConverterTest
     }
 
     @Test
-    public void testFloat8Conversion()
+    public void convert_withFloat8Type_returnsDoubleValue()
     {
         Field field = mockField(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
         Object result = ValueConverter.convert(field, "2.7182818284");
@@ -70,7 +70,7 @@ public class ValueConverterTest
     }
 
     @Test
-    public void testBitConversion()
+    public void convert_withBitType_returnsBooleanValue()
     {
         Field field = mockField(new ArrowType.Bool());
         Object result = ValueConverter.convert(field, "true");
@@ -78,7 +78,7 @@ public class ValueConverterTest
     }
 
     @Test
-    public void testVarBinaryConversion()
+    public void convert_withVarBinaryType_returnsByteArray()
     {
         Field field = mockField(new ArrowType.Binary());
         Object result = ValueConverter.convert(field, "hello");
@@ -86,7 +86,7 @@ public class ValueConverterTest
     }
 
     @Test
-    public void testNullInput()
+    public void convert_withNullInput_returnsNull()
     {
         Field field = mockField(new ArrowType.Utf8());
         Object result = ValueConverter.convert(field, null);
@@ -94,7 +94,7 @@ public class ValueConverterTest
     }
 
     @Test(expected = RuntimeException.class)
-    public void testUnsupportedType()
+    public void convert_withUnsupportedType_throwsRuntimeException()
     {
         Field field = mockField(new ArrowType.Decimal(10, 2, 128));
         ValueConverter.convert(field, "100.00");

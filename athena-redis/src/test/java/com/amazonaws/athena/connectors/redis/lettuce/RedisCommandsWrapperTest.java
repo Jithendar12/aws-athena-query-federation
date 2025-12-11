@@ -46,7 +46,11 @@ public class RedisCommandsWrapperTest
 {
     private static final String TEST_KEY = "key";
     private static final String TEST_VALUE = "value";
+    private static final String TEST_FIELD = "field";
+    private static final String TEST_RESULT = "result";
     private static final String RESPONSE_OK = "OK";
+    private static final double TEST_SCORE = 1.0;
+    private static final String REDIS_GET_SCRIPT = "return redis.call('GET', KEYS[1])";
     @Mock
     private RedisCommands<String, String> standaloneCommands;
 
@@ -76,7 +80,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testScan_withStandaloneConnection_returnsKeyScanCursor()
+    public void scan_withStandaloneConnection_returnsKeyScanCursor()
     {
         when(standaloneCommands.scan(scanCursor, scanArgs)).thenReturn(keyScanCursor);
 
@@ -87,7 +91,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testScan_withClusterConnection_returnsKeyScanCursor()
+    public void scan_withClusterConnection_returnsKeyScanCursor()
     {
         when(clusterCommands.scan(scanCursor, scanArgs)).thenReturn(keyScanCursor);
 
@@ -98,7 +102,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testZcount_withStandaloneConnection_returnsCount()
+    public void zcount_withStandaloneConnection_returnsCount()
     {
         Range<? extends Number> range = Range.create(1, 100);
         when(standaloneCommands.zcount(TEST_KEY, range)).thenReturn(10L);
@@ -110,7 +114,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testZcount_withClusterConnection_returnsCount()
+    public void zcount_withClusterConnection_returnsCount()
     {
         Range<? extends Number> range = Range.create(1, 100);
         when(clusterCommands.zcount(TEST_KEY, range)).thenReturn(20L);
@@ -122,7 +126,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testZrange_withStandaloneConnection_returnsList()
+    public void zrange_withStandaloneConnection_returnsList()
     {
         List<String> expectedList = Collections.singletonList(TEST_VALUE);
         when(standaloneCommands.zrange(TEST_KEY, 0, 1)).thenReturn(expectedList);
@@ -134,7 +138,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testZrange_withClusterConnection_returnsList()
+    public void zrange_withClusterConnection_returnsList()
     {
         List<String> expectedList = Collections.singletonList(TEST_VALUE);
         when(clusterCommands.zrange(TEST_KEY, 0, 1)).thenReturn(expectedList);
@@ -146,7 +150,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testGet_withStandaloneConnection_returnsValue()
+    public void get_withStandaloneConnection_returnsValue()
     {
         when(standaloneCommands.get(TEST_KEY)).thenReturn(TEST_VALUE);
 
@@ -157,7 +161,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testGet_withClusterConnection_returnsValue()
+    public void get_withClusterConnection_returnsValue()
     {
         when(clusterCommands.get(TEST_KEY)).thenReturn(TEST_VALUE);
 
@@ -168,9 +172,9 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testHgetall_withStandaloneConnection_returnsMap()
+    public void hgetall_withStandaloneConnection_returnsMap()
     {
-        Map<String, String> expectedMap = Collections.singletonMap("field", TEST_VALUE);
+        Map<String, String> expectedMap = Collections.singletonMap(TEST_FIELD, TEST_VALUE);
         when(standaloneCommands.hgetall(TEST_KEY)).thenReturn(expectedMap);
 
         Map<String, String> result = standaloneWrapper.hgetall(TEST_KEY);
@@ -180,9 +184,9 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testHgetall_withClusterConnection_returnsMap()
+    public void hgetall_withClusterConnection_returnsMap()
     {
-        Map<String, String> expectedMap = Collections.singletonMap("field", TEST_VALUE);
+        Map<String, String> expectedMap = Collections.singletonMap(TEST_FIELD, TEST_VALUE);
         when(clusterCommands.hgetall(TEST_KEY)).thenReturn(expectedMap);
 
         Map<String, String> result = clusterWrapper.hgetall(TEST_KEY);
@@ -192,7 +196,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testZscan_withStandaloneConnection_returnsCursor()
+    public void zscan_withStandaloneConnection_returnsCursor()
     {
         when(standaloneCommands.zscan(TEST_KEY, scanCursor)).thenReturn(scoredValueScanCursor);
 
@@ -203,7 +207,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testZscan_withClusterConnection_returnsCursor()
+    public void zscan_withClusterConnection_returnsCursor()
     {
         when(clusterCommands.zscan(TEST_KEY, scanCursor)).thenReturn(scoredValueScanCursor);
 
@@ -214,39 +218,39 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testEvalReadOnly_withStandaloneConnection_returnsResult()
+    public void evalReadOnly_withStandaloneConnection_returnsResult()
     {
-        byte[] script = "return redis.call('GET', KEYS[1])".getBytes();
-        String[] keys = new String[]{"key"};
-        String[] values = new String[]{"value"};
+        byte[] script = REDIS_GET_SCRIPT.getBytes();
+        String[] keys = new String[]{TEST_KEY};
+        String[] values = new String[]{TEST_VALUE};
 
-        when(standaloneCommands.evalReadOnly(script, ScriptOutputType.VALUE, keys, values)).thenReturn("result");
+        when(standaloneCommands.evalReadOnly(script, ScriptOutputType.VALUE, keys, values)).thenReturn(TEST_RESULT);
 
         String result = standaloneWrapper.evalReadOnly(script, ScriptOutputType.VALUE, keys, values);
 
-        assertEquals("result", result);
+        assertEquals(TEST_RESULT, result);
         verify(standaloneCommands).evalReadOnly(script, ScriptOutputType.VALUE, keys, values);
     }
 
     @Test
-    public void testEvalReadOnly_withClusterConnection_returnsResult()
+    public void evalReadOnly_withClusterConnection_returnsResult()
     {
-        byte[] script = "return redis.call('GET', KEYS[1])".getBytes();
-        String[] keys = new String[]{"key"};
-        String[] values = new String[]{"value"};
+        byte[] script = REDIS_GET_SCRIPT.getBytes();
+        String[] keys = new String[]{TEST_KEY};
+        String[] values = new String[]{TEST_VALUE};
 
-        when(clusterCommands.evalReadOnly(script, ScriptOutputType.VALUE, keys, values)).thenReturn("result");
+        when(clusterCommands.evalReadOnly(script, ScriptOutputType.VALUE, keys, values)).thenReturn(TEST_RESULT);
 
         String result = clusterWrapper.evalReadOnly(script, ScriptOutputType.VALUE, keys, values);
 
-        assertEquals("result", result);
+        assertEquals(TEST_RESULT, result);
         verify(clusterCommands).evalReadOnly(script, ScriptOutputType.VALUE, keys, values);
     }
 
     @Test
-    public void testHmset_withStandaloneConnection_returnsOK()
+    public void hmset_withStandaloneConnection_returnsOK()
     {
-        Map<String, String> data = Collections.singletonMap("field", TEST_VALUE);
+        Map<String, String> data = Collections.singletonMap(TEST_FIELD, TEST_VALUE);
 
         when(standaloneCommands.hmset(TEST_KEY, data)).thenReturn(RESPONSE_OK);
 
@@ -257,9 +261,9 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testHmset_withClusterConnection_returnsOK()
+    public void hmset_withClusterConnection_returnsOK()
     {
-        Map<String, String> data = Collections.singletonMap("field", TEST_VALUE);
+        Map<String, String> data = Collections.singletonMap(TEST_FIELD, TEST_VALUE);
 
         when(clusterCommands.hmset(TEST_KEY, data)).thenReturn(RESPONSE_OK);
 
@@ -270,29 +274,29 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testZadd_withStandaloneConnection_returnsOne()
+    public void zadd_withStandaloneConnection_returnsOne()
     {
-        when(standaloneCommands.zadd("key", 1.0, "value")).thenReturn(1L);
+        when(standaloneCommands.zadd(TEST_KEY, TEST_SCORE, TEST_VALUE)).thenReturn(1L);
 
-        Long result = standaloneWrapper.zadd("key", 1.0, "value");
+        Long result = standaloneWrapper.zadd(TEST_KEY, TEST_SCORE, TEST_VALUE);
 
         assertEquals(Long.valueOf(1), result);
-        verify(standaloneCommands).zadd("key", 1.0, "value");
+        verify(standaloneCommands).zadd(TEST_KEY, TEST_SCORE, TEST_VALUE);
     }
 
     @Test
-    public void testZadd_withClusterConnection_returnsOne()
+    public void zadd_withClusterConnection_returnsOne()
     {
-        when(clusterCommands.zadd("key", 1.0, "value")).thenReturn(1L);
+        when(clusterCommands.zadd(TEST_KEY, TEST_SCORE, TEST_VALUE)).thenReturn(1L);
 
-        Long result = clusterWrapper.zadd("key", 1.0, "value");
+        Long result = clusterWrapper.zadd(TEST_KEY, TEST_SCORE, TEST_VALUE);
 
         assertEquals(Long.valueOf(1), result);
-        verify(clusterCommands).zadd("key", 1.0, "value");
+        verify(clusterCommands).zadd(TEST_KEY, TEST_SCORE, TEST_VALUE);
     }
 
     @Test
-    public void testSet_withStandaloneConnection_returnsOK()
+    public void set_withStandaloneConnection_returnsOK()
     {
         when(standaloneCommands.set(TEST_KEY, TEST_VALUE)).thenReturn(RESPONSE_OK);
 
@@ -303,7 +307,7 @@ public class RedisCommandsWrapperTest
     }
 
     @Test
-    public void testSet_withClusterConnection_returnsOK()
+    public void set_withClusterConnection_returnsOK()
     {
         when(clusterCommands.set(TEST_KEY, TEST_VALUE)).thenReturn(RESPONSE_OK);
 
