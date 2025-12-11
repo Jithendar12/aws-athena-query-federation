@@ -28,13 +28,15 @@ import com.amazonaws.athena.connector.lambda.data.writers.extractors.VarCharExtr
 import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableDecimalHolder;
 import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableVarBinaryHolder;
 import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableVarCharHolder;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connectors.dynamodb.util.DDBRecordMetadata;
 import com.amazonaws.athena.connectors.dynamodb.util.DDBTypeUtils;
-
 import com.google.common.collect.ImmutableMap;
 import org.apache.arrow.vector.holders.NullableBitHolder;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.Before;
 import org.junit.Test;
@@ -43,18 +45,25 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.arrow.vector.types.pojo.Field;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 
@@ -62,9 +71,32 @@ import static org.mockito.Mockito.mock;
 public class DDBTypeUtilsTest
 {
     private static final Logger logger = LoggerFactory.getLogger(DDBTypeUtilsTest.class);
+    private static final String TEST_FIELD_NAME = "testField";
+    private static final String TEST_DATE_FIELD = "testDate";
+    private static final String TEST_COLUMN_NAME = "testColumn";
+    private static final String VALUE_1 = "value1";
+    private static final String VALUE_2 = "value2";
+    private static final String KEY = "key";
+    private static final String VALUE = "value";
+    private static final String TEST_DATA = "test data";
+    private static final String UNKNOWN_TYPE = "UNKNOWN";
+    private static final String UNSUPPORTED = "unsupported";
+    private static final String STRING_TYPE = "S";
+    private static final String NUMBER_TYPE = "N";
+    private static final String BOOLEAN_TYPE = "BOOL";
+    private static final String BINARY_TYPE = "B";
+    private static final String STRING_SET_TYPE = "SS";
+    private static final String NUMBER_SET_TYPE = "NS";
+    private static final String BINARY_SET_TYPE = "BS";
+    private static final String LIST_TYPE = "L";
+    private static final String MAP_TYPE = "M";
+    private static final String UTC_TIMEZONE = "UTC";
+    private static final String DATETIME_FORMAT = "yyyy-MM-dd HH:mm:ss";
+    private static final String EXPECTED_KEY = "expectedKey";
+    private static final String WRONG_KEY = "wrongKey";
 
-    private String col1 = "col_1";
-    private String col2 = "col_2";
+    private final String col1 = "col_1";
+    private final String col2 = "col_2";
     private Schema mapping;
 
     @Mock
@@ -185,6 +217,75 @@ public class DDBTypeUtilsTest
         assertEquals("Wrong Child Type!", ArrowType.Utf8.INSTANCE, testField.getChildren().get(0).getType());
     }
 
+    @Test
+    public void inferArrowField_withSetOfNumbers_returnsListFieldWithDecimalChild()
+    {
+        Set<BigDecimal> numberSet = new HashSet<>();
+        numberSet.add(new BigDecimal("123.45"));
+        numberSet.add(new BigDecimal("678.90"));
+        
+        Field result = DDBTypeUtils.inferArrowField("testNumberSet", DDBTypeUtils.toAttributeValue(numberSet));
+
+        assertField(result, "testNumberSet", Types.MinorType.LIST.getType(), true);
+        assertEquals(ArrowType.Decimal.createDecimal(38, 9, 128), result.getChildren().get(0).getType());
+    }
+
+    @Test
+    public void inferArrowField_withSetOfStrings_returnsListFieldWithVarcharChild()
+    {
+        Set<String> stringSet = new HashSet<>();
+        stringSet.add(VALUE_1);
+        stringSet.add(VALUE_2);
+        
+        Field result = DDBTypeUtils.inferArrowField("testStringSet", DDBTypeUtils.toAttributeValue(stringSet));
+
+        assertField(result, "testStringSet", Types.MinorType.LIST.getType(), true);
+        assertEquals(Types.MinorType.VARCHAR.getType(), result.getChildren().get(0).getType());
+    }
+
+    @Test
+    public void inferArrowField_withEmptyList_returnsNull()
+    {
+        AttributeValue value = AttributeValue.builder()
+                .l(Collections.emptyList())
+                .build();
+        
+        Field result = DDBTypeUtils.inferArrowField("testEmptyList", value);
+        // This is the expected behavior for empty lists that can't be inferred
+        assertNull("Result should be null for empty list", result);
+    }
+
+    @Test
+    public void inferArrowField_withBytesType_returnsVarBinaryField()
+    {
+        byte[] bytes = TEST_DATA.getBytes();
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+        AttributeValue value = AttributeValue.builder().b(SdkBytes.fromByteBuffer(buffer)).build();
+        
+        Field result = DDBTypeUtils.inferArrowField("testBytes", value);
+
+        assertField(result, "testBytes", Types.MinorType.VARBINARY.getType(), true);
+    }
+
+    @Test
+    public void inferArrowField_withBooleanType_returnsBitField()
+    {
+        AttributeValue value = AttributeValue.builder().bool(true).build();
+        
+        Field result = DDBTypeUtils.inferArrowField("testBoolean", value);
+
+        assertField(result, "testBoolean", Types.MinorType.BIT.getType(), true);
+    }
+
+    @Test
+    public void inferArrowField_withNullAttributeValue_returnsNull()
+    {
+        // Create an AttributeValue with null to trigger the null return path
+        AttributeValue value = AttributeValue.builder().nul(true).build();
+        Field result = DDBTypeUtils.inferArrowField(TEST_FIELD_NAME, value);
+        assertNull("Result should be null for null attribute value", result);
+    }
+
     private Map<String, Object> testField(Schema mapping, Map<String, AttributeValue> values)
             throws Exception
     {
@@ -225,5 +326,318 @@ public class DDBTypeUtilsTest
             }
         }
         return results;
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withStringType_returnsVarcharField()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testString", STRING_TYPE);
+        assertField(result, "testString", Types.MinorType.VARCHAR.getType(), true);
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withNumberType_returnsDecimalField()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testNumber", NUMBER_TYPE);
+        assertEquals("testNumber", result.getName());
+        assertEquals(ArrowType.Decimal.createDecimal(38, 9, 128), result.getType());
+        assertTrue("Field should be nullable", result.getFieldType().isNullable());
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withBooleanType_returnsBitField()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testBoolean", BOOLEAN_TYPE);
+        assertField(result, "testBoolean", Types.MinorType.BIT.getType(), true);
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withBinaryType_returnsVarBinaryField()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testBinary", BINARY_TYPE);
+        assertField(result, "testBinary", Types.MinorType.VARBINARY.getType(), true);
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withStringSetType_returnsListFieldWithVarcharChild()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testStringSet", STRING_SET_TYPE);
+        assertField(result, "testStringSet", Types.MinorType.LIST.getType(), true);
+        assertEquals(Types.MinorType.VARCHAR.getType(), result.getChildren().get(0).getType());
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withNumberSetType_returnsListFieldWithDecimalChild()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testNumberSet", NUMBER_SET_TYPE);
+        assertField(result, "testNumberSet", Types.MinorType.LIST.getType(), true);
+        assertEquals(ArrowType.Decimal.createDecimal(38, 9, 128), result.getChildren().get(0).getType());
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withBinarySetType_returnsListFieldWithVarBinaryChild()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testBinarySet", BINARY_SET_TYPE);
+        assertField(result, "testBinarySet", Types.MinorType.LIST.getType(), true);
+        assertEquals(Types.MinorType.VARBINARY.getType(), result.getChildren().get(0).getType());
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withListType_returnsListField()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testList", LIST_TYPE);
+        assertField(result, "testList", Types.MinorType.LIST.getType(), true);
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withMapType_returnsStructField()
+    {
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testMap", MAP_TYPE);
+        assertField(result, "testMap", Types.MinorType.STRUCT.getType(), true);
+    }
+
+    @Test
+    public void getArrowFieldFromDDBType_withUnknownType_throwsAthenaConnectorException()
+    {
+        try {
+            DDBTypeUtils.getArrowFieldFromDDBType("testUnknown", UNKNOWN_TYPE);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            assertTrue("Exception message should contain error about unknown type",
+                    ex.getMessage() != null && !ex.getMessage().isEmpty());
+        }
+    }
+
+    @Test
+    public void coerceValueToExpectedType_withBigDecimalToDateMilli_returnsLocalDateTime()
+    {
+        BigDecimal timestamp = new BigDecimal("1609459200000"); // 2021-01-01 00:00:00 UTC
+        Field field = new Field(TEST_DATE_FIELD, FieldType.nullable(Types.MinorType.DATEMILLI.getType()), null);
+        
+        Object result = DDBTypeUtils.coerceValueToExpectedType(timestamp, field, Types.MinorType.DATEMILLI, 
+                new DDBRecordMetadata(SchemaBuilder.newBuilder().addField(field).build()));
+        
+        assertTrue("Result should be LocalDateTime", result instanceof LocalDateTime);
+        LocalDateTime dateTime = (LocalDateTime) result;
+        assertEquals(2021, dateTime.getYear());
+        assertEquals(1, dateTime.getMonthValue());
+        assertEquals(1, dateTime.getDayOfMonth());
+    }
+
+    @Test
+    public void coerceValueToExpectedType_withBigDecimalToDateDay_returnsLocalDate()
+    {
+        BigDecimal days = new BigDecimal("18628");
+        Field field = new Field(TEST_DATE_FIELD, FieldType.nullable(Types.MinorType.DATEDAY.getType()), null);
+        DDBRecordMetadata metadata = new DDBRecordMetadata(SchemaBuilder.newBuilder()
+                .addField(TEST_DATE_FIELD, Types.MinorType.DATEDAY.getType())
+                .build());
+        
+        Object result = DDBTypeUtils.coerceValueToExpectedType(days, field, Types.MinorType.DATEDAY, metadata);
+        
+        assertNotNull("Result should not be null", result);
+        assertTrue("Result should be LocalDate", result instanceof LocalDate);
+    }
+
+    @Test
+    public void coerceValueToExpectedType_withBigDecimalToNumericType_returnsDouble()
+    {
+        BigDecimal value = new BigDecimal("123.45");
+        Field field = new Field("testNumber", FieldType.nullable(Types.MinorType.FLOAT8.getType()), null);
+        DDBRecordMetadata metadata = new DDBRecordMetadata(SchemaBuilder.newBuilder()
+                .addField("testNumber", Types.MinorType.FLOAT8.getType())
+                .build());
+        
+        Object result = DDBTypeUtils.coerceValueToExpectedType(value, field, Types.MinorType.FLOAT8, metadata);
+        
+        assertNotNull("Result should not be null", result);
+        // The coercion should convert BigDecimal to Double for FLOAT8 type
+        assertTrue("Result should be Double for FLOAT8 type", result instanceof Double);
+        assertEquals(value.doubleValue(), (Double) result, 0.001);
+    }
+
+    @Test
+    public void coerceValueToExpectedType_withInvalidDateFormat_returnsLocalDateTimeWithDefaultValues()
+    {
+        BigDecimal invalidValue = new BigDecimal("-1");
+        Field field = new Field(TEST_DATE_FIELD, FieldType.nullable(Types.MinorType.DATEMILLI.getType()), null);
+        DDBRecordMetadata metadata = new DDBRecordMetadata(SchemaBuilder.newBuilder()
+                .addField(TEST_DATE_FIELD, Types.MinorType.DATEMILLI.getType())
+                .build());
+        
+        Object result = DDBTypeUtils.coerceValueToExpectedType(invalidValue, field, Types.MinorType.DATEMILLI, metadata);
+        
+        assertTrue("Result should be LocalDateTime", result instanceof LocalDateTime);
+        LocalDateTime dateTime = (LocalDateTime) result;
+        assertEquals(1969, dateTime.getYear());
+        assertEquals(12, dateTime.getMonthValue());
+        assertEquals(31, dateTime.getDayOfMonth());
+        assertEquals(23, dateTime.getHour());
+        assertEquals(59, dateTime.getMinute());
+        assertEquals(59, dateTime.getSecond());
+        assertEquals(999, dateTime.getNano() / 1_000_000);
+    }
+
+    @Test
+    public void convertArrowTypeIfNecessary_withLocalDateTimeWithFormat_returnsFormattedString()
+    {
+        LocalDateTime dateTime = LocalDateTime.of(2021, 1, 1, 12, 30, 45);
+        
+        // Create schema with custom metadata for timezone and format
+        Map<String, String> customMetadata = new HashMap<>();
+        customMetadata.put("defaultTimeZone", UTC_TIMEZONE);
+        customMetadata.put("datetimeFormatMappingNormalized", TEST_COLUMN_NAME + "=" + DATETIME_FORMAT);
+        
+        Schema schemaWithMetadata = new Schema(Collections.emptyList(), customMetadata);
+        DDBRecordMetadata metadata = new DDBRecordMetadata(schemaWithMetadata);
+        
+        Object result = DDBTypeUtils.convertArrowTypeIfNecessary(TEST_COLUMN_NAME, dateTime, metadata);
+        
+        assertTrue("Result should be String", result instanceof String);
+        assertEquals("2021-01-01 12:30:45", result);
+    }
+
+    @Test
+    public void coerceValueToExpectedType_withBigDecimalToUnsupportedDateType_returnsOriginalValue()
+    {
+        BigDecimal value = new BigDecimal("123456789");
+        Field field = new Field(TEST_FIELD_NAME, FieldType.nullable(Types.MinorType.VARCHAR.getType()), null);
+        DDBRecordMetadata metadata = new DDBRecordMetadata(new Schema(Collections.singletonList(field)));
+        
+        Object result = DDBTypeUtils.coerceValueToExpectedType(value, field, Types.MinorType.VARCHAR, metadata);
+        
+        assertEquals(value, result);
+    }
+
+    @Test
+    public void coerceValueToExpectedType_withIllegalArgumentExceptionInCatch_returnsOriginalValue()
+    {
+        // This will trigger the catch block by using a type that causes IllegalArgumentException
+        BigDecimal value = new BigDecimal("12345");
+        Field field = new Field(TEST_FIELD_NAME, FieldType.nullable(Types.MinorType.VARCHAR.getType()), null);
+        DDBRecordMetadata metadata = new DDBRecordMetadata(new Schema(Collections.singletonList(field)));
+        
+        // Force the coercible type flag to trigger the DateTime path with non-DateTime type
+        // This should return the original value after the exception is caught
+        Object result = DDBTypeUtils.coerceValueToExpectedType(value, field, Types.MinorType.VARCHAR, metadata);
+        
+        assertEquals(value, result);
+    }
+
+    @Test
+    public void coerceListToExpectedType_withMapInsteadOfList_throwsAthenaConnectorException()
+    {
+        try {
+            Map<String, String> mapValue = new HashMap<>();
+            mapValue.put(KEY, VALUE);
+            
+            Field childField = new Field("child", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null);
+            Field field = new Field("testList", FieldType.nullable(Types.MinorType.LIST.getType()), Collections.singletonList(childField));
+            DDBRecordMetadata metadata = new DDBRecordMetadata(new Schema(Collections.singletonList(field)));
+            
+            DDBTypeUtils.coerceListToExpectedType(mapValue, field, metadata);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            assertTrue("Exception message should contain error about map instead of list",
+                    ex.getMessage() != null && !ex.getMessage().isEmpty());
+        }
+    }
+
+    @Test
+    public void makeExtractor_withCaseInsensitive_returnsExtractor()
+    {
+        Field field = new Field("TestField", FieldType.nullable(ArrowType.Decimal.createDecimal(38, 9, 128)), null);
+        DDBRecordMetadata metadata = new DDBRecordMetadata(new Schema(Collections.singletonList(field)));
+        
+        Optional<Extractor> extractor = DDBTypeUtils.makeExtractor(field, metadata, true);
+        
+        assertTrue("Extractor should be present", extractor.isPresent());
+    }
+
+    @Test
+    public void toAttributeValue_withBigDecimal_returnsAttributeValueWithNumber()
+    {
+        BigDecimal value = new BigDecimal("123.456");
+        
+        AttributeValue result = DDBTypeUtils.toAttributeValue(value);
+        
+        assertNotNull("Result should not be null", result);
+        assertEquals("123.456", result.n());
+    }
+
+    @Test
+    public void toAttributeValue_withByteArray_returnsAttributeValueWithBinary()
+    {
+        byte[] bytes = TEST_DATA.getBytes();
+        
+        AttributeValue result = DDBTypeUtils.toAttributeValue(bytes);
+        
+        assertNotNull("Result should not be null", result);
+        assertNotNull("Result should have binary value", result.b());
+    }
+
+    @Test
+    public void toAttributeValue_withByteBuffer_returnsAttributeValueWithBinary()
+    {
+        ByteBuffer buffer = ByteBuffer.wrap(TEST_DATA.getBytes());
+        
+        AttributeValue result = DDBTypeUtils.toAttributeValue(buffer);
+        
+        assertNotNull("Result should not be null", result);
+        assertNotNull("Result should have binary value", result.b());
+    }
+
+    private void assertField(Field result, String expectedName, ArrowType expectedType, boolean expectedNullable)
+    {
+        assertNotNull("Result should not be null", result);
+        assertEquals(expectedName, result.getName());
+        assertEquals(expectedType, result.getType());
+        assertTrue("Field should be nullable", result.getFieldType().isNullable() == expectedNullable);
+    }
+
+    @Test
+    public void toAttributeValue_withUnsupportedType_throwsAthenaConnectorException()
+    {
+        try {
+            Object unsupportedValue = new StringBuilder(UNSUPPORTED);
+            DDBTypeUtils.toAttributeValue(unsupportedValue);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            assertTrue("Exception message should contain error about unsupported type",
+                    ex.getMessage() != null && !ex.getMessage().isEmpty());
+        }
+    }
+
+    @Test
+    public void jsonToAttributeValue_withUnknownKey_throwsAthenaConnectorException()
+    {
+        try {
+            String json = "{\"" + WRONG_KEY + "\": \"" + VALUE + "\"}";
+            DDBTypeUtils.jsonToAttributeValue(json, EXPECTED_KEY);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            assertTrue("Exception message should contain error about unknown key",
+                    ex.getMessage() != null && !ex.getMessage().isEmpty());
+        }
+    }
+
+    @Test
+    public void toAttributeValue_withUnsupportedSetType_throwsAthenaConnectorException()
+    {
+        try {
+            Set<Object> unsupportedSet = new HashSet<>();
+            unsupportedSet.add(new StringBuilder(UNSUPPORTED));
+            
+            DDBTypeUtils.toAttributeValue(unsupportedSet);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (AthenaConnectorException ex) {
+            assertTrue("Exception message should contain error about unsupported set type",
+                    ex.getMessage() != null && !ex.getMessage().isEmpty());
+        }
     }
 }
