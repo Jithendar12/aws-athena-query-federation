@@ -60,28 +60,28 @@ public class RedisConnectionWrapperTest
     }
 
     @Test
-    public void testSync_withStandaloneConnection_returnsWrapper()
+    public void sync_withStandaloneConnection_returnsWrapper()
     {
         RedisCommandsWrapper<String, String> wrapper = standaloneWrapper.sync();
         assertNotNull(wrapper);
     }
 
     @Test
-    public void testSync_withClusterConnection_returnsWrapper()
+    public void sync_withClusterConnection_returnsWrapper()
     {
         RedisCommandsWrapper<String, String> wrapper = clusterWrapper.sync();
         assertNotNull(wrapper);
     }
 
     @Test
-    public void testClose_withStandaloneConnection_closesConnection()
+    public void close_withStandaloneConnection_closesConnection()
     {
         standaloneWrapper.close();
         verify(standaloneConnection, times(1)).close();
     }
 
     @Test
-    public void testClose_withClusterConnection_closesConnection()
+    public void close_withClusterConnection_closesConnection()
     {
         clusterWrapper.close();
         verify(clusterConnection, times(1)).close();

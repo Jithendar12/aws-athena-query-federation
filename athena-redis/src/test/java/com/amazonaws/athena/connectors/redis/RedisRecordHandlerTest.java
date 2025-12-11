@@ -272,7 +272,7 @@ public class RedisRecordHandlerTest
         logger.info("doReadRecordsLiteral: rows[{}]", response.getRecordCount());
 
         logger.info("doReadRecordsLiteral: {}", BlockUtils.rowToString(response.getRecords(), 0));
-        assertTrue(response.getRecords().getRowCount() == 2);
+        assertEquals(2, response.getRecords().getRowCount());
 
         FieldReader keyReader = response.getRecords().getFieldReader(KEY_COLUMN_NAME);
         keyReader.setPosition(0);
@@ -371,8 +371,8 @@ public class RedisRecordHandlerTest
         logger.info("doReadRecordsHash: rows[{}]", response.getRecordCount());
 
         logger.info("doReadRecordsHash: {}", BlockUtils.rowToString(response.getRecords(), 0));
-        assertTrue(response.getRecords().getRowCount() == 5);
-        assertTrue(response.getRecords().getFields().size() == schemaForRead.getFields().size());
+        assertEquals(5, response.getRecords().getRowCount());
+        assertEquals(response.getRecords().getFields().size(), schemaForRead.getFields().size());
 
         FieldReader keyReader = response.getRecords().getFieldReader(KEY_COLUMN_NAME);
         keyReader.setPosition(0);
@@ -485,7 +485,7 @@ public class RedisRecordHandlerTest
         logger.info("doReadRecordsZset: rows[{}]", response.getRecordCount());
 
         logger.info("doReadRecordsZset: {}", BlockUtils.rowToString(response.getRecords(), 0));
-        assertTrue(response.getRecords().getRowCount() == 12);
+        assertEquals(12, response.getRecords().getRowCount());
 
         FieldReader keyReader = response.getRecords().getFieldReader(KEY_COLUMN_NAME);
         keyReader.setPosition(0);
@@ -497,7 +497,7 @@ public class RedisRecordHandlerTest
     }
 
     @Test
-    public void testReadWithConstraint_withQueryPassthrough()
+    public void readWithConstraint_withQueryPassthrough_returnsFilteredRecords()
     {
         List<Object> evalResult = Arrays.asList("value1", Arrays.asList("value2", "value3"), "value4");
 
