@@ -54,7 +54,7 @@ public class SQLServerJDBCCaseResolverTest extends TestBase
     }
 
     @Test
-    public void testCaseInsensitiveCaseOnName() throws SQLException {
+    public void getAdjustedName_caseInsensitiveSearchOnName_returnsAdjustedNames() throws SQLException {
             String schemaName = "oRaNgE";
             String tableName = "ApPlE";
             DefaultJDBCCaseResolver resolver = new SQLServerJDBCCaseResolver("sqlserver");
@@ -85,7 +85,7 @@ public class SQLServerJDBCCaseResolverTest extends TestBase
     }
 
     @Test
-    public void testCaseInsensitiveCaseOnObject() throws SQLException {
+    public void getAdjustedTableNameObject_caseInsensitiveSearchOnObject_returnsAdjustedTableNameObject() throws SQLException {
             String schemaName = "oRaNgE";
             String tableName = "ApPlE";
             DefaultJDBCCaseResolver resolver = new SQLServerJDBCCaseResolver("sqlserver");

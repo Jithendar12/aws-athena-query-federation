@@ -83,6 +83,12 @@ public class SqlServerRecordHandlerTest
     private static final String COL_VARCHAR = "varcharCol";
     private static final String COL_IS_ACTIVE = "is_active";
     private static final String COL_AMOUNT = "amount";
+    private static final String COL_BIGINT = "bigintCol";
+    private static final String COL_FLOAT = "floatCol";
+    private static final String COL_DOUBLE = "doubleCol";
+    private static final String COL_DATE = "dateCol";
+    private static final String COL_TIMESTAMP = "timestampCol";
+    private static final String COL_BOOL = "boolCol";
 
     private SqlServerRecordHandler sqlServerRecordHandler;
     private Connection connection;
@@ -129,13 +135,8 @@ public class SqlServerRecordHandlerTest
         Mockito.when(split.getProperty(PARTITION_NUMBER)).thenReturn("1");
 
         ValueSet valueSet = createSingleValueSet(TEST_VARCHAR_VALUE);
-        Constraints constraints = new Constraints(
-                ImmutableMap.of(TEST_COL4, valueSet),
-                Collections.emptyList(),
-                Collections.emptyList(),
-                5L,
-                Collections.emptyMap(),
-                null
+        Constraints constraints = createConstraints(
+                ImmutableMap.of(TEST_COL4, valueSet)
         );
 
         String expectedSql = "SELECT \"testCol1\", \"testCol2\", \"testCol3\", \"testCol4\" FROM \"testSchema\".\"testTable\"  WHERE (\"testCol4\" = ?) AND  $PARTITION.pf(testCol1) = 1";
@@ -172,7 +173,7 @@ public class SqlServerRecordHandlerTest
         ValueSet activeSet = createSingleValueSet(true);
         ValueSet amountSet = createSingleValueSet(1234.56);
 
-        Constraints constraints = new Constraints(
+        Constraints constraints = createConstraints(
                 ImmutableMap.of(
                         COL_ID, idSet,
                         COL_AGE, ageSet,
@@ -180,12 +181,7 @@ public class SqlServerRecordHandlerTest
                         COL_DEPARTMENT, deptSet,
                         COL_IS_ACTIVE, activeSet,
                         COL_AMOUNT, amountSet
-                ),
-                Collections.emptyList(),
-                Collections.emptyList(),
-                Constraints.DEFAULT_NO_LIMIT,
-                Collections.emptyMap(),
-                null
+                )
         );
 
         String expectedSql = "SELECT \"id\", \"name\", \"age\", \"salary\", \"department\", \"is_active\", \"amount\" FROM \"testSchema\".\"testTable\"  WHERE (\"id\" IN (?,?,?,?,?)) AND ((\"age\" >= ? AND \"age\" <= ?)) AND ((\"salary\" > ? AND \"salary\" < ?)) AND (\"department\" = ?) AND (\"is_active\" = ?) AND (\"amount\" = ?)";
@@ -227,17 +223,12 @@ public class SqlServerRecordHandlerTest
         ValueSet quantitySet = createRangeSet(Marker.Bound.EXACTLY, 10, Marker.Bound.BELOW, 100);
         ValueSet discountSet = createRangeSet(Marker.Bound.ABOVE, 0.05f, Marker.Bound.BELOW, 0.5f);
 
-        Constraints constraints = new Constraints(
+        Constraints constraints = createConstraints(
                 ImmutableMap.of(
                         COL_PRICE, priceSet,
                         COL_QUANTITY, quantitySet,
                         COL_DISCOUNT, discountSet
-                ),
-                Collections.emptyList(),
-                Collections.emptyList(),
-                Constraints.DEFAULT_NO_LIMIT,
-                Collections.emptyMap(),
-                null
+                )
         );
 
         String expectedSql = "SELECT \"price\", \"quantity\", \"discount\" FROM \"testSchema\".\"testTable\"  WHERE ((\"price\" > ? AND \"price\" <= ?)) AND ((\"quantity\" >= ? AND \"quantity\" < ?)) AND ((\"discount\" > ? AND \"discount\" < ?))";
@@ -333,8 +324,7 @@ public class SqlServerRecordHandlerTest
 
         Split split = createTestSplit();
 
-        // Empty constraints
-        Constraints constraints = createEmptyConstraint();
+        Constraints constraints = createConstraints(Collections.emptyMap());
 
         String expectedSql = "SELECT \"id\" FROM \"testSchema\".\"testTable\" ";
         PreparedStatement expectedPreparedStatement = createMockPreparedStatement(expectedSql);
@@ -357,14 +347,7 @@ public class SqlServerRecordHandlerTest
 
         // Single value should use equality, not IN clause
         ValueSet singleValueSet = createSingleValueSet(1);
-        Constraints constraints = new Constraints(
-                ImmutableMap.of(COL_ID, singleValueSet),
-                Collections.emptyList(),
-                Collections.emptyList(),
-                Constraints.DEFAULT_NO_LIMIT,
-                Collections.emptyMap(),
-                null
-        );
+        Constraints constraints = createConstraints(ImmutableMap.of(COL_ID, singleValueSet));
 
         String expectedSql = "SELECT \"id\" FROM \"testSchema\".\"testTable\"  WHERE (\"id\" = ?)";
         PreparedStatement expectedPreparedStatement = createMockPreparedStatement(expectedSql);
@@ -390,14 +373,7 @@ public class SqlServerRecordHandlerTest
 
         // Large IN clause with many values
         ValueSet largeInSet = createMultiValueSet(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-        Constraints constraints = new Constraints(
-                ImmutableMap.of(COL_ID, largeInSet),
-                Collections.emptyList(),
-                Collections.emptyList(),
-                Constraints.DEFAULT_NO_LIMIT,
-                Collections.emptyMap(),
-                null
-        );
+        Constraints constraints = createConstraints(ImmutableMap.of(COL_ID, largeInSet));
 
         String expectedSql = "SELECT \"id\" FROM \"testSchema\".\"testTable\"  WHERE (\"id\" IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?))";
         PreparedStatement expectedPreparedStatement = createMockPreparedStatement(expectedSql);
@@ -418,7 +394,7 @@ public class SqlServerRecordHandlerTest
                 .addField(FieldBuilder.newBuilder(COL_ID, Types.MinorType.INT.getType()).build())
                 .build();
         Split split = createTestSplit();
-        Constraints constraints = createEmptyConstraint();
+        Constraints constraints = createConstraints(Collections.emptyMap());
         Connection invalidConnection = Mockito.mock(Connection.class);
         Mockito.when(invalidConnection.prepareStatement(Mockito.anyString())).thenThrow(new SQLException("Connection error"));
 
@@ -499,13 +475,8 @@ public class SqlServerRecordHandlerTest
         ValueSet intValueSet = createSingleValueSet(123);
         ValueSet varcharValueSet = createSingleValueSet("abc");
 
-        Constraints constraints = new Constraints(
-                com.google.common.collect.ImmutableMap.of(COL_INT, intValueSet, COL_VARCHAR, varcharValueSet),
-                Collections.emptyList(),
-                Collections.emptyList(),
-                Constraints.DEFAULT_NO_LIMIT,
-                Collections.emptyMap(),
-                null);
+        Constraints constraints = createConstraints(ImmutableMap.of(COL_INT, intValueSet, COL_VARCHAR, varcharValueSet)
+        );
 
         Assert.assertFalse("Expected isQueryPassThrough to return false", constraints.isQueryPassThrough());
 
@@ -582,12 +553,12 @@ public class SqlServerRecordHandlerTest
         SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
         schemaBuilder.addField(FieldBuilder.newBuilder(COL_INT, Types.MinorType.INT.getType()).build());
         schemaBuilder.addField(FieldBuilder.newBuilder(COL_VARCHAR, Types.MinorType.VARCHAR.getType()).build());
-        schemaBuilder.addField(FieldBuilder.newBuilder("bigintCol", Types.MinorType.BIGINT.getType()).build());
-        schemaBuilder.addField(FieldBuilder.newBuilder("floatCol", Types.MinorType.FLOAT4.getType()).build());
-        schemaBuilder.addField(FieldBuilder.newBuilder("doubleCol", Types.MinorType.FLOAT8.getType()).build());
-        schemaBuilder.addField(FieldBuilder.newBuilder("dateCol", Types.MinorType.DATEDAY.getType()).build());
-        schemaBuilder.addField(FieldBuilder.newBuilder("timestampCol", Types.MinorType.DATEMILLI.getType()).build());
-        schemaBuilder.addField(FieldBuilder.newBuilder("boolCol", Types.MinorType.BIT.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder(COL_BIGINT, Types.MinorType.BIGINT.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder(COL_FLOAT, Types.MinorType.FLOAT4.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder(COL_DOUBLE, Types.MinorType.FLOAT8.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder(COL_DATE, Types.MinorType.DATEDAY.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder(COL_TIMESTAMP, Types.MinorType.DATEMILLI.getType()).build());
+        schemaBuilder.addField(FieldBuilder.newBuilder(COL_BOOL, Types.MinorType.BIT.getType()).build());
         return schemaBuilder.build();
     }
     
@@ -639,10 +610,10 @@ public class SqlServerRecordHandlerTest
         return split;
     }
     
-    private Constraints createEmptyConstraint()
+    private Constraints createConstraints(Map<String, ValueSet> summary)
     {
         return new Constraints(
-                Collections.emptyMap(),
+                summary != null ? summary : Collections.emptyMap(),
                 Collections.emptyList(),
                 Collections.emptyList(),
                 Constraints.DEFAULT_NO_LIMIT,

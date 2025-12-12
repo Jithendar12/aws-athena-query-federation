@@ -131,7 +131,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createEmptyConstraint();
         TableName tableName = new TableName("testSchema", "testTable");
         Schema partitionSchema = this.sqlServerMetadataHandler.getPartitionSchema("testCatalogName");
         Set<String> partitionCols = partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
@@ -180,7 +180,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createEmptyConstraint();
         TableName tableName = new TableName("testSchema", "testTable");
         Schema partitionSchema = this.sqlServerMetadataHandler.getPartitionSchema("testCatalogName");
         Set<String> partitionCols = partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
@@ -225,7 +225,7 @@ public class SqlServerMetadataHandlerTest
     public void doGetTableLayoutWithSQLException()
             throws Exception
     {
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createEmptyConstraint();
         TableName tableName = new TableName("testSchema", "testTable");
         Schema partitionSchema = this.sqlServerMetadataHandler.getPartitionSchema("testCatalogName");
         Set<String> partitionCols = partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
@@ -245,7 +245,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createEmptyConstraint();
         TableName tableName = new TableName("testSchema", "testTable");
 
         PreparedStatement viewCheckPreparedStatement = Mockito.mock(PreparedStatement.class);
@@ -307,7 +307,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createEmptyConstraint();
         TableName tableName = new TableName("testSchema", "testTable");
 
         PreparedStatement viewCheckPreparedStatement = Mockito.mock(PreparedStatement.class);
@@ -353,7 +353,7 @@ public class SqlServerMetadataHandlerTest
             throws Exception
     {
         BlockAllocator blockAllocator = new BlockAllocatorImpl();
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Constraints.DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createEmptyConstraint();
         TableName tableName = new TableName("testSchema", "testTable");
         Schema partitionSchema = this.sqlServerMetadataHandler.getPartitionSchema("testCatalogName");
         Set<String> partitionCols = partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
@@ -469,7 +469,7 @@ public class SqlServerMetadataHandlerTest
     }
 
     @Test
-    public void testDoGetTable_withSqlServerSpecificTypes() throws Exception {
+    public void doGetTable_SqlServerSpecificTypes_ReturnsMappedArrowTypes() throws Exception {
             BlockAllocator blockAllocator = new BlockAllocatorImpl();
             String[] schema = {"DATA_TYPE", "COLUMN_SIZE", "COLUMN_NAME", "DECIMAL_DIGITS", "NUM_PREC_RADIX"};
             Object[][] values = {
@@ -545,7 +545,7 @@ public class SqlServerMetadataHandlerTest
     }
 
     @Test
-    public void testDoGetTable_withUnsupported_fallbackToVarchar() throws Exception {
+    public void doGetTable_UnsupportedType_FallsBackToVarchar() throws Exception {
             BlockAllocator blockAllocator = new BlockAllocatorImpl();
             String[] schema = {"DATA_TYPE", "COLUMN_SIZE", "COLUMN_NAME", "DECIMAL_DIGITS", "NUM_PREC_RADIX"};
             Object[][] values = {
@@ -597,7 +597,7 @@ public class SqlServerMetadataHandlerTest
     }
 
     @Test
-    public void testConvertDatasourceTypeToArrow_withSqlServerSpecificTypes() throws SQLException {
+    public void convertDatasourceTypeToArrow_SqlServerSpecificTypes_ReturnsMappedArrowTypes() throws SQLException {
             ResultSetMetaData metaData = Mockito.mock(ResultSetMetaData.class);
             Map<String, String> configOptions = new HashMap<>();
             int precision = 0;
@@ -630,7 +630,7 @@ public class SqlServerMetadataHandlerTest
     }
 
     @Test
-    public void testDoGetDataSourceCapabilities()
+    public void doGetDataSourceCapabilities_DefaultRequest_ReturnsExpectedCapabilities()
     {
         BlockAllocator allocator = new BlockAllocatorImpl();
         GetDataSourceCapabilitiesRequest request =
@@ -664,5 +664,17 @@ public class SqlServerMetadataHandlerTest
         assertNotNull("Expected supports_top_n_pushdown capability to be present", topNPushdown);
         assertEquals(1, topNPushdown.size());
         assertEquals("SUPPORTS_ORDER_BY", topNPushdown.get(0).getSubType());
+    }
+    
+    private Constraints createEmptyConstraint()
+    {
+        return new Constraints(
+                Collections.emptyMap(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Constraints.DEFAULT_NO_LIMIT,
+                Collections.emptyMap(),
+                null
+        );
     }
 }
