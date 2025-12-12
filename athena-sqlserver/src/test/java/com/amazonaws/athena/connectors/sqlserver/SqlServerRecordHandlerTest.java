@@ -261,13 +261,10 @@ public class SqlServerRecordHandlerTest
         Split split = createTestSplit();
 
         OrderByField orderByField = new OrderByField(COL_SALARY, OrderByField.Direction.DESC_NULLS_LAST);
-        Constraints constraints = new Constraints(
+        Constraints constraints = createConstraints(
                 Collections.emptyMap(),
-                Collections.emptyList(),
                 ImmutableList.of(orderByField),
-                10, // limit
-                Collections.emptyMap(),
-                null
+                10
         );
 
         String expectedSql = "SELECT \"id\", \"name\", \"salary\" FROM \"testSchema\".\"testTable\"  ORDER BY \"salary\" DESC NULLS LAST";
@@ -296,13 +293,10 @@ public class SqlServerRecordHandlerTest
         OrderByField orderByField2 = new OrderByField(COL_SALARY, OrderByField.Direction.DESC_NULLS_FIRST);
         OrderByField orderByField3 = new OrderByField(COL_NAME, OrderByField.Direction.ASC_NULLS_LAST);
 
-        Constraints constraints = new Constraints(
+        Constraints constraints = createConstraints(
                 Collections.emptyMap(),
-                Collections.emptyList(),
                 ImmutableList.of(orderByField1, orderByField2, orderByField3),
-                Constraints.DEFAULT_NO_LIMIT,
-                Collections.emptyMap(),
-                null
+                Constraints.DEFAULT_NO_LIMIT
         );
 
         String expectedSql = "SELECT \"department\", \"salary\", \"name\" FROM \"testSchema\".\"testTable\"  ORDER BY \"department\" ASC NULLS LAST, \"salary\" DESC NULLS FIRST, \"name\" ASC NULLS LAST";
@@ -414,13 +408,10 @@ public class SqlServerRecordHandlerTest
         Split split = createTestSplit();
 
         // Test LIMIT constraint (should be ignored by SQL Server)
-        Constraints constraints = new Constraints(
+        Constraints constraints = createConstraints(
                 Collections.emptyMap(),
                 Collections.emptyList(),
-                Collections.emptyList(),
-                100L, // limit
-                Collections.emptyMap(),
-                null
+                100L
         );
 
         // SQL Server doesn't support LIMIT, so it should be ignored
@@ -455,8 +446,7 @@ public class SqlServerRecordHandlerTest
                 .put("schema", TEST_SCHEMA)
                 .build();
 
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
-                Constraints.DEFAULT_NO_LIMIT, queryPassthroughArgs, null);
+        Constraints constraints = createConstraintsWithQueryPassthrough(queryPassthroughArgs);
 
         PreparedStatement expectedPreparedStatement = createMockPreparedStatement(testQuery);
         PreparedStatement preparedStatement = this.sqlServerRecordHandler.buildSplitSql(this.connection, TEST_CATALOG_NAME, tableName, schema, constraints, split);
@@ -504,8 +494,7 @@ public class SqlServerRecordHandlerTest
                 .put("schema", TEST_SCHEMA)
                 .build();
 
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
-                Constraints.DEFAULT_NO_LIMIT, queryPassthroughArgs, null);
+        Constraints constraints = createConstraintsWithQueryPassthrough(queryPassthroughArgs);
 
         Assert.assertTrue("Expected isQueryPassThrough to return true", constraints.isQueryPassThrough());
 
@@ -534,8 +523,7 @@ public class SqlServerRecordHandlerTest
                 .put("schema", TEST_SCHEMA)
                 .build();
 
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(),
-                Constraints.DEFAULT_NO_LIMIT, queryPassthroughArgs, null);
+        Constraints constraints = createConstraintsWithQueryPassthrough(queryPassthroughArgs);
 
         Assert.assertTrue("Expected isQueryPassThrough to return true", constraints.isQueryPassThrough());
 
@@ -612,12 +600,36 @@ public class SqlServerRecordHandlerTest
     
     private Constraints createConstraints(Map<String, ValueSet> summary)
     {
+        return createConstraints(
+                summary,
+                Collections.emptyList(),
+                Constraints.DEFAULT_NO_LIMIT
+        );
+    }
+
+    private Constraints createConstraints(
+            Map<String, ValueSet> summary,
+            java.util.List<OrderByField> orderByFields,
+            long limit)
+    {
         return new Constraints(
                 summary != null ? summary : Collections.emptyMap(),
                 Collections.emptyList(),
+                orderByFields,
+                limit,
+                Collections.emptyMap(),
+                null
+        );
+    }
+
+    private Constraints createConstraintsWithQueryPassthrough(Map<String, String> queryPassthroughArgs)
+    {
+        return new Constraints(
+                Collections.emptyMap(),
+                Collections.emptyList(),
                 Collections.emptyList(),
                 Constraints.DEFAULT_NO_LIMIT,
-                Collections.emptyMap(),
+                queryPassthroughArgs,
                 null
         );
     }
