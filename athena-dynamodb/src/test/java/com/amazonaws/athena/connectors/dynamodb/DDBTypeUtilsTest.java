@@ -94,6 +94,18 @@ public class DDBTypeUtilsTest
     private static final String DATETIME_FORMAT = "yyyy-MM-dd HH:mm:ss";
     private static final String EXPECTED_KEY = "expectedKey";
     private static final String WRONG_KEY = "wrongKey";
+    private static final String TEST_STRING_SET = "testStringSet";
+    private static final String TEST_NUMBER_SET = "testNumberSet";
+    private static final String TEST_BINARY_SET = "testBinarySet";
+    private static final String TEST_LIST = "testList";
+    private static final String TEST_MAP = "testMap";
+    private static final String TEST_BYTES = "testBytes";
+    private static final String TEST_BOOLEAN = "testBoolean";
+    private static final String TEST_EMPTY_LIST = "testEmptyList";
+    private static final String TEST_STRING = "testString";
+    private static final String TEST_NUMBER = "testNumber";
+    private static final String TEST_BINARY = "testBinary";
+    private static final String TEST_UNKNOWN = "testUnknown";
 
     private String col1 = "col_1";
     private String col2 = "col_2";
@@ -224,9 +236,9 @@ public class DDBTypeUtilsTest
         numberSet.add(new BigDecimal("123.45"));
         numberSet.add(new BigDecimal("678.90"));
         
-        Field result = DDBTypeUtils.inferArrowField("testNumberSet", DDBTypeUtils.toAttributeValue(numberSet));
+        Field result = DDBTypeUtils.inferArrowField(TEST_NUMBER_SET, DDBTypeUtils.toAttributeValue(numberSet));
 
-        assertField(result, "testNumberSet", Types.MinorType.LIST.getType());
+        assertField(result, TEST_NUMBER_SET, Types.MinorType.LIST.getType());
         assertEquals(ArrowType.Decimal.createDecimal(38, 9, 128), result.getChildren().get(0).getType());
     }
 
@@ -237,9 +249,9 @@ public class DDBTypeUtilsTest
         stringSet.add(VALUE_1);
         stringSet.add(VALUE_2);
         
-        Field result = DDBTypeUtils.inferArrowField("testStringSet", DDBTypeUtils.toAttributeValue(stringSet));
+        Field result = DDBTypeUtils.inferArrowField(TEST_STRING_SET, DDBTypeUtils.toAttributeValue(stringSet));
 
-        assertField(result, "testStringSet", Types.MinorType.LIST.getType());
+        assertField(result, TEST_STRING_SET, Types.MinorType.LIST.getType());
         assertEquals(Types.MinorType.VARCHAR.getType(), result.getChildren().get(0).getType());
     }
 
@@ -250,7 +262,7 @@ public class DDBTypeUtilsTest
                 .l(Collections.emptyList())
                 .build();
         
-        Field result = DDBTypeUtils.inferArrowField("testEmptyList", value);
+        Field result = DDBTypeUtils.inferArrowField(TEST_EMPTY_LIST, value);
         // This is the expected behavior for empty lists that can't be inferred
         assertNull("Result should be null for empty list", result);
     }
@@ -262,9 +274,9 @@ public class DDBTypeUtilsTest
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         AttributeValue value = AttributeValue.builder().b(SdkBytes.fromByteBuffer(buffer)).build();
         
-        Field result = DDBTypeUtils.inferArrowField("testBytes", value);
+        Field result = DDBTypeUtils.inferArrowField(TEST_BYTES, value);
 
-        assertField(result, "testBytes", Types.MinorType.VARBINARY.getType());
+        assertField(result, TEST_BYTES, Types.MinorType.VARBINARY.getType());
     }
 
     @Test
@@ -272,9 +284,9 @@ public class DDBTypeUtilsTest
     {
         AttributeValue value = AttributeValue.builder().bool(true).build();
         
-        Field result = DDBTypeUtils.inferArrowField("testBoolean", value);
+        Field result = DDBTypeUtils.inferArrowField(TEST_BOOLEAN, value);
 
-        assertField(result, "testBoolean", Types.MinorType.BIT.getType());
+        assertField(result, TEST_BOOLEAN, Types.MinorType.BIT.getType());
     }
 
     @Test
@@ -331,76 +343,76 @@ public class DDBTypeUtilsTest
     @Test
     public void getArrowFieldFromDDBType_withStringType_returnsVarcharField()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testString", STRING_TYPE);
-        assertField(result, "testString", Types.MinorType.VARCHAR.getType());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_STRING, STRING_TYPE);
+        assertField(result, TEST_STRING, Types.MinorType.VARCHAR.getType());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withNumberType_returnsDecimalField()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testNumber", NUMBER_TYPE);
-        assertEquals("testNumber", result.getName());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_NUMBER, NUMBER_TYPE);
+        assertEquals(TEST_NUMBER, result.getName());
         assertEquals(ArrowType.Decimal.createDecimal(38, 9, 128), result.getType());
-        assertTrue("Field should be nullable", result.getFieldType().isNullable());
+        assertTrue("FieldType should be nullable", result.getFieldType().isNullable());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withBooleanType_returnsBitField()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testBoolean", BOOLEAN_TYPE);
-        assertField(result, "testBoolean", Types.MinorType.BIT.getType());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_BOOLEAN, BOOLEAN_TYPE);
+        assertField(result, TEST_BOOLEAN, Types.MinorType.BIT.getType());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withBinaryType_returnsVarBinaryField()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testBinary", BINARY_TYPE);
-        assertField(result, "testBinary", Types.MinorType.VARBINARY.getType());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_BINARY, BINARY_TYPE);
+        assertField(result, TEST_BINARY, Types.MinorType.VARBINARY.getType());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withStringSetType_returnsListFieldWithVarcharChild()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testStringSet", STRING_SET_TYPE);
-        assertField(result, "testStringSet", Types.MinorType.LIST.getType());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_STRING_SET, STRING_SET_TYPE);
+        assertField(result, TEST_STRING_SET, Types.MinorType.LIST.getType());
         assertEquals(Types.MinorType.VARCHAR.getType(), result.getChildren().get(0).getType());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withNumberSetType_returnsListFieldWithDecimalChild()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testNumberSet", NUMBER_SET_TYPE);
-        assertField(result, "testNumberSet", Types.MinorType.LIST.getType());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_NUMBER_SET, NUMBER_SET_TYPE);
+        assertField(result, TEST_NUMBER_SET, Types.MinorType.LIST.getType());
         assertEquals(ArrowType.Decimal.createDecimal(38, 9, 128), result.getChildren().get(0).getType());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withBinarySetType_returnsListFieldWithVarBinaryChild()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testBinarySet", BINARY_SET_TYPE);
-        assertField(result, "testBinarySet", Types.MinorType.LIST.getType());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_BINARY_SET, BINARY_SET_TYPE);
+        assertField(result, TEST_BINARY_SET, Types.MinorType.LIST.getType());
         assertEquals(Types.MinorType.VARBINARY.getType(), result.getChildren().get(0).getType());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withListType_returnsListField()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testList", LIST_TYPE);
-        assertField(result, "testList", Types.MinorType.LIST.getType());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_LIST, LIST_TYPE);
+        assertField(result, TEST_LIST, Types.MinorType.LIST.getType());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withMapType_returnsStructField()
     {
-        Field result = DDBTypeUtils.getArrowFieldFromDDBType("testMap", MAP_TYPE);
-        assertField(result, "testMap", Types.MinorType.STRUCT.getType());
+        Field result = DDBTypeUtils.getArrowFieldFromDDBType(TEST_MAP, MAP_TYPE);
+        assertField(result, TEST_MAP, Types.MinorType.STRUCT.getType());
     }
 
     @Test
     public void getArrowFieldFromDDBType_withUnknownType_throwsAthenaConnectorException()
     {
         try {
-            DDBTypeUtils.getArrowFieldFromDDBType("testUnknown", UNKNOWN_TYPE);
+            DDBTypeUtils.getArrowFieldFromDDBType(TEST_UNKNOWN, UNKNOWN_TYPE);
             fail("Expected AthenaConnectorException was not thrown");
         }
         catch (AthenaConnectorException ex) {
@@ -533,7 +545,7 @@ public class DDBTypeUtilsTest
             mapValue.put(KEY, VALUE);
             
             Field childField = new Field("child", FieldType.nullable(Types.MinorType.VARCHAR.getType()), null);
-            Field field = new Field("testList", FieldType.nullable(Types.MinorType.LIST.getType()), Collections.singletonList(childField));
+            Field field = new Field(TEST_LIST, FieldType.nullable(Types.MinorType.LIST.getType()), Collections.singletonList(childField));
             DDBRecordMetadata metadata = new DDBRecordMetadata(new Schema(Collections.singletonList(field)));
             
             DDBTypeUtils.coerceListToExpectedType(mapValue, field, metadata);
@@ -594,7 +606,7 @@ public class DDBTypeUtilsTest
         assertNotNull("Result should not be null", result);
         assertEquals(expectedName, result.getName());
         assertEquals(expectedType, result.getType());
-        assertTrue("Field should be nullable", result.getFieldType().isNullable());
+        assertTrue("FieldType should be nullable", result.getFieldType().isNullable());
     }
 
     @Test

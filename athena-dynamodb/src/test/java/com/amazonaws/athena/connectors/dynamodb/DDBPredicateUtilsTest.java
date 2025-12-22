@@ -852,12 +852,10 @@ public class DDBPredicateUtilsTest
     }
 
     @Test
-    public void generateSingleColumnFilter_withMultipleValues_returnsInClauseForWhitelistAndNotInClauseForBlacklist()
+    public void generateSingleColumnFilter_withMultipleValues_returnsInClauseForWhitelist()
     {
         final String expectedInClause = "#test_column IN (:v0,:v1,:v2)";
-        final String expectedNotInClause = "NOT " + expectedInClause;
 
-        // Test whitelist (IN) case
         List<AttributeValue> accumulator = new ArrayList<>();
         IncrementingValueNameProducer valueNameProducer = new IncrementingValueNameProducer();
         
@@ -878,15 +876,27 @@ public class DDBPredicateUtilsTest
         
         // Verify the bound values
         verifyAccumulatorValues(accumulator);
+    }
 
-        // Test blacklist (NOT IN) case
-        accumulator = new ArrayList<>();
-        valueNameProducer = new IncrementingValueNameProducer();
+    @Test
+    public void generateSingleColumnFilter_withMultipleValues_returnsNotInClauseForBlacklist()
+    {
+        final String expectedInClause = "#test_column IN (:v0,:v1,:v2)";
+        final String expectedNotInClause = "NOT " + expectedInClause;
+
+        List<AttributeValue> accumulator = new ArrayList<>();
+        IncrementingValueNameProducer valueNameProducer = new IncrementingValueNameProducer();
         
-        valueSet = EquatableValueSet.newBuilder(new BlockAllocatorImpl(), VARCHAR.getType(), false, false)
+        // Create a schema with a VARCHAR field
+        List<Field> fields = new ArrayList<>();
+        fields.add(new Field("test_column", FieldType.nullable(VARCHAR.getType()), null));
+        Schema schema = new Schema(fields);
+        DDBRecordMetadata recordMetadata = new DDBRecordMetadata(schema);
+        
+        ValueSet valueSet = EquatableValueSet.newBuilder(new BlockAllocatorImpl(), VARCHAR.getType(), false, false)
                 .add(VALUE_1).add(VALUE_2).add(VALUE_3).build();
 
-        filterExpression = DDBPredicateUtils.generateSingleColumnFilter(
+        String filterExpression = DDBPredicateUtils.generateSingleColumnFilter(
                 "test_column", valueSet, accumulator, valueNameProducer, recordMetadata, false);
 
         // Verify the filter expression contains NOT IN clause
