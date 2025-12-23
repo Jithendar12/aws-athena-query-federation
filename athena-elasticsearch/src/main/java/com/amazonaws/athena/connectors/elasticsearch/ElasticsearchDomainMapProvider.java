@@ -168,6 +168,14 @@ public class ElasticsearchDomainMapProvider
             throw new AthenaConnectorException("Unable to create domain map: Invalid DomainMapping value.", ErrorDetails.builder().errorCode(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString()).build());
         }
 
+        // Validate that no keys or values are empty (e.g., "=" creates a map with empty key and value)
+        for (Map.Entry<String, String> entry : domainMap.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isEmpty() || entry.getValue() == null || entry.getValue().isEmpty()) {
+                // Intentional obfuscation of error message: domainMapping contains sensitive info (e.g. username/password).
+                throw new AthenaConnectorException("Unable to create domain map: Invalid DomainMapping value.", ErrorDetails.builder().errorCode(FederationSourceErrorCode.INVALID_INPUT_EXCEPTION.toString()).build());
+            }
+        }
+
         return domainMap;
     }
 }

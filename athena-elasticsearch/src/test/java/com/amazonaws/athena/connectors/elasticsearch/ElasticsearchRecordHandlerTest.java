@@ -84,7 +84,7 @@ import java.util.UUID;
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
@@ -480,5 +480,75 @@ public class ElasticsearchRecordHandlerTest
                 .withSplitId(UUID.randomUUID().toString())
                 .withIsDirectory(true)
                 .build();
+    }
+
+    @Test
+    public void readWithConstraint_whenQueryNotRunning_doesNotProcessRecords()
+            throws Exception
+    {
+        logger.info("readWithConstraint_whenQueryNotRunning_doesNotProcessRecords - enter");
+
+        com.amazonaws.athena.connector.lambda.QueryStatusChecker queryStatusChecker =
+                mock(com.amazonaws.athena.connector.lambda.QueryStatusChecker.class);
+        when(queryStatusChecker.isQueryRunning()).thenReturn(false);
+
+        ReadRecordsRequest request = new ReadRecordsRequest(fakeIdentity(),
+                "elasticsearch",
+                "queryId-" + System.currentTimeMillis(),
+                new TableName("movies", "mishmash"),
+                mapping,
+                split,
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        // Call protected readWithConstraint method directly (same package, no reflection needed)
+        com.amazonaws.athena.connector.lambda.data.BlockSpiller spiller =
+                mock(com.amazonaws.athena.connector.lambda.data.BlockSpiller.class);
+
+        handler.readWithConstraint(spiller, request, queryStatusChecker);
+
+        // Verify no search was called when query is not running
+        verify(mockClient, org.mockito.Mockito.never()).search(any(), any());
+
+        logger.info("readWithConstraint_whenQueryNotRunning_doesNotProcessRecords - exit");
+    }
+
+    @Test
+    public void readWithConstraint_whenIOException_throwsAthenaConnectorException()
+            throws Exception
+    {
+        logger.info("readWithConstraint_whenIOException_throwsAthenaConnectorException - enter");
+
+        com.amazonaws.athena.connector.lambda.QueryStatusChecker queryStatusChecker =
+                mock(com.amazonaws.athena.connector.lambda.QueryStatusChecker.class);
+        when(queryStatusChecker.isQueryRunning()).thenReturn(true);
+
+        when(mockClient.search(any(), any())).thenThrow(new IOException("Search failed"));
+
+        ReadRecordsRequest request = new ReadRecordsRequest(fakeIdentity(),
+                "elasticsearch",
+                "queryId-" + System.currentTimeMillis(),
+                new TableName("movies", "mishmash"),
+                mapping,
+                split,
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        // Call protected readWithConstraint method directly (same package, no reflection needed)
+        com.amazonaws.athena.connector.lambda.data.BlockSpiller spiller =
+                mock(com.amazonaws.athena.connector.lambda.data.BlockSpiller.class);
+
+        try {
+            handler.readWithConstraint(spiller, request, queryStatusChecker);
+            fail("Expected AthenaConnectorException was not thrown");
+        }
+        catch (com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException ex) {
+            assertTrue("Exception message should contain Error sending search query",
+                    ex.getMessage().contains("Error sending search query"));
+        }
     }
 }
