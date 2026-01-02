@@ -34,6 +34,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -154,5 +157,47 @@ public class CacheableAwsRestHighLevelClientTest
         assertNull("Invalid value returned from cache.", clientCache.get("endpoint1"));
 
         logger.info("evictExceededCapacityClientTest - exit");
+    }
+
+    @Test
+    public void get_withUnhealthyClient_evictsClientFromCache()
+            throws IOException
+    {
+        clientCache.put("endpoint1", client1);
+        clientCache.put("endpoint2", client2);
+
+        assertEquals("Cache should have 2 clients", 2, clientCache.size());
+
+        // Make client1 unhealthy - get() will call evictCache(endpoint) internally
+        when(client1.ping(any())).thenThrow(new IOException("Connection failed"));
+        when(client2.ping(any())).thenReturn(true);
+
+        // get() will detect unhealthy client and evict it
+        assertNull("Unhealthy client should not be returned", clientCache.get("endpoint1"));
+
+        assertEquals("Cache should have 1 client after eviction", 1, clientCache.size());
+        // Verify that client1 was closed during eviction
+        verify(client1, times(1)).close();
+        // Verify that client2 is still accessible after selective eviction
+        assertNotNull("Client2 should still be accessible after evicting client1", clientCache.get("endpoint2"));
+        assertEquals("Wrong client returned from cache", client2, clientCache.get("endpoint2"));
+    }
+
+    @Test
+    public void get_withUnhealthyClient_whenCloseThrowsIOException_handlesGracefully()
+            throws IOException
+    {
+        doThrow(new IOException("Close failed")).when(client1).close();
+        clientCache.put("endpoint1", client1);
+
+        // Make client unhealthy - get() will call evictCache(endpoint) internally, which calls closeClient
+        when(client1.ping(any())).thenThrow(new IOException("Connection failed"));
+
+        // get() will detect unhealthy client and evict it (closeClient may throw IOException but should be handled)
+        clientCache.get("endpoint1");
+
+        assertEquals("Cache should be empty after eviction", 0, clientCache.size());
+        // Verify that close() was invoked during eviction
+        verify(client1, times(1)).close();
     }
 }
