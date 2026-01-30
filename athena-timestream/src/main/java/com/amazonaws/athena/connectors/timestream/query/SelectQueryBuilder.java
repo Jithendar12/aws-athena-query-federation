@@ -20,6 +20,7 @@
 package com.amazonaws.athena.connectors.timestream.query;
 
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
+import com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.commons.lang3.Validate;
 import org.stringtemplate.v4.ST;
@@ -44,6 +45,8 @@ public class SelectQueryBuilder
     private List<String> conjucts;
     private String databaseName;
     private String tableName;
+    private String orderByClause;
+    private String limitClause;
 
     public SelectQueryBuilder(ST template, String viewTextPropertyName)
     {
@@ -104,6 +107,50 @@ public class SelectQueryBuilder
     {
         this.databaseName = databaseName;
         return this;
+    }
+
+    public String getOrderByClause()
+    {
+        return orderByClause;
+    }
+
+    public SelectQueryBuilder withOrderByClause(Constraints constraints)
+    {
+        this.orderByClause = extractOrderByClause(constraints);
+        return this;
+    }
+
+    public String getLimitClause()
+    {
+        return limitClause;
+    }
+
+    public SelectQueryBuilder withLimitClause(Constraints constraints)
+    {
+        if (constraints.getLimit() > 0) {
+            this.limitClause = "LIMIT " + constraints.getLimit();
+        }
+        return this;
+    }
+
+    private String extractOrderByClause(Constraints constraints)
+    {
+        List<OrderByField> orderByFields = constraints.getOrderByClause();
+        if (orderByFields == null || orderByFields.isEmpty()) {
+            return "";
+        }
+        return "ORDER BY " + orderByFields.stream()
+                .map(orderByField -> {
+                    String ordering = orderByField.getDirection().isAscending() ? "ASC" : "DESC";
+                    String nullsHandling = orderByField.getDirection().isNullsFirst() ? "NULLS FIRST" : "NULLS LAST";
+                    return quoteColumn(orderByField.getColumnName()) + " " + ordering + " " + nullsHandling;
+                })
+                .collect(Collectors.joining(", "));
+    }
+
+    private String quoteColumn(String name)
+    {
+        return "\"" + name + "\"";
     }
 
     public String build()

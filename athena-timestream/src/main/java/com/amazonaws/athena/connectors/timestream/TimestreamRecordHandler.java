@@ -125,6 +125,8 @@ public class TimestreamRecordHandler
                     .withTableName(tableName.getTableName())
                     .withProjection(recordsRequest.getSchema())
                     .withConjucts(recordsRequest.getConstraints())
+                    .withOrderByClause(recordsRequest.getConstraints())
+                    .withLimitClause(recordsRequest.getConstraints())
                     .build();
         }
 

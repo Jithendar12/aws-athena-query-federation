@@ -24,7 +24,6 @@ import com.amazonaws.athena.connector.lambda.domain.predicate.EquatableValueSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.ValueSet;
-import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import org.apache.arrow.vector.types.Types;
@@ -36,6 +35,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class PredicateBuilder
@@ -46,6 +46,8 @@ public class PredicateBuilder
             .appendPattern("yyyy-MM-dd HH:mm:ss.nnnnnnnnn")
             .toFormatter()
             .withZone(ZoneId.of("UTC"));
+
+    private static final QueryFactory queryFactory = new QueryFactory();
 
     private PredicateBuilder() {}
 
@@ -78,16 +80,39 @@ public class PredicateBuilder
 
         if (valueSet instanceof SortedRangeSet) {
             if (valueSet.isNone() && valueSet.isNullAllowed()) {
-                return String.format("(%s IS NULL)", columnName);
+                return TimestreamSqlUtils.renderTemplate(
+                    queryFactory,
+                    "null_predicate",
+                    Map.of(
+                        "columnName", quoteColumn(columnName),
+                        "isNull", true
+                    )
+                );
             }
 
             if (valueSet.isNullAllowed()) {
-                disjuncts.add(String.format("(%s IS NULL)", columnName));
+                disjuncts.add(
+                    TimestreamSqlUtils.renderTemplate(
+                        queryFactory,
+                        "null_predicate",
+                        Map.of(
+                            "columnName", quoteColumn(columnName),
+                            "isNull", true
+                        )
+                    )
+                );
             }
 
             Range rangeSpan = ((SortedRangeSet) valueSet).getSpan();
             if (!valueSet.isNullAllowed() && rangeSpan.getLow().isLowerUnbounded() && rangeSpan.getHigh().isUpperUnbounded()) {
-                return String.format("(%s IS NOT NULL)", columnName);
+                return TimestreamSqlUtils.renderTemplate(
+                    queryFactory,
+                    "null_predicate",
+                    Map.of(
+                        "columnName", quoteColumn(columnName),
+                        "isNull", false
+                    )
+                );
             }
 
             for (Range range : valueSet.getRanges().getOrderedRanges()) {
@@ -126,7 +151,13 @@ public class PredicateBuilder
                     }
                     // If rangeConjuncts is null, then the range was ALL, which should already have been checked for
                     Preconditions.checkState(!rangeConjuncts.isEmpty());
-                    disjuncts.add("(" + Joiner.on(" AND ").join(rangeConjuncts) + ")");
+                    disjuncts.add(
+                        TimestreamSqlUtils.renderTemplate(
+                            queryFactory,
+                            "range_predicate",
+                            Map.of("conjuncts", rangeConjuncts)
+                        )
+                    );
                 }
             }
 
@@ -136,8 +167,16 @@ public class PredicateBuilder
             }
             else if (singleValues.size() > 1) {
                 List<String> values = singleValues.stream().map(next -> quoteValue(next, valueSet.getType())).collect(Collectors.toList());
-                String valuesStr = Joiner.on(",").join(values);
-                disjuncts.add(quoteColumn(columnName) + " IN (" + valuesStr + ")");
+                disjuncts.add(
+                    TimestreamSqlUtils.renderTemplate(
+                        queryFactory,
+                        "in_predicate",
+                        Map.of(
+                            "columnName", quoteColumn(columnName),
+                            "values", values
+                        )
+                    )
+                );
             }
         }
         else if (valueSet instanceof EquatableValueSet) {
@@ -145,16 +184,39 @@ public class PredicateBuilder
             for (int i = 0; i < ((EquatableValueSet) valueSet).getValueBlock().getRowCount(); i++) {
                 values.add(quoteValue(((EquatableValueSet) valueSet).getValue(i), valueSet.getType()));
             }
-            String valuesStr = Joiner.on(",").join(values);
-            disjuncts.add(quoteColumn(columnName) + " IN (" + valuesStr + ")");
+            disjuncts.add(
+                TimestreamSqlUtils.renderTemplate(
+                    queryFactory,
+                    "in_predicate",
+                    Map.of(
+                        "columnName", quoteColumn(columnName),
+                        "values", values
+                    )
+                )
+            );
         }
 
-        return "(" + Joiner.on(" OR ").join(disjuncts) + ")";
+        if (disjuncts.isEmpty()) {
+            return "";
+        }
+        return TimestreamSqlUtils.renderTemplate(
+            queryFactory,
+            "or_predicate",
+            Map.of("disjuncts", disjuncts)
+        );
     }
 
     private static String toPredicate(String columnName, String operator, Object value, ArrowType type)
     {
-        return quoteColumn(columnName) + " " + operator + " " + quoteValue(value, type);
+        return TimestreamSqlUtils.renderTemplate(
+            queryFactory,
+            "comparison_predicate",
+            Map.of(
+                "columnName", quoteColumn(columnName),
+                "operator", operator,
+                "value", quoteValue(value, type)
+            )
+        );
     }
 
     private static String quoteColumn(String name)

@@ -27,4 +27,64 @@ select_query(builder) ::= <%
         <first(builder.conjucts): {next_conjuct | <next_conjuct>}>
         <rest(builder.conjucts): {next_conjuct | <\ >AND <next_conjuct>}><\ >
     <endif>
+    <if(builder.orderByClause)>
+    <builder.orderByClause><\ >
+    <endif>
+    <if(builder.limitClause)>
+    <builder.limitClause><\ >
+    <endif>
+%>
+
+/**
+ *@UsedBy: PredicateBuilder.java
+ *@Description: Template for NULL checking predicates.
+ *@param columnName The column name (with quotes).
+ *@param isNull Whether checking for NULL (true) or NOT NULL (false).
+ *@return A null predicate like "column" IS NULL or "column" IS NOT NULL
+ */
+null_predicate(columnName, isNull) ::= <%
+    (<columnName> IS <if(isNull)>NULL<else>NOT NULL<endif>)
+%>
+
+/**
+ *@UsedBy: PredicateBuilder.java
+ *@Description: Template for simple comparison predicates (=, >, <, >=, <=).
+ *@param columnName The column name (with quotes).
+ *@param operator The comparison operator.
+ *@param value The value to compare (already quoted/formatted).
+ *@return A comparison predicate like "column" > 'value'
+ */
+comparison_predicate(columnName, operator, value) ::= <%
+    <columnName> <operator> <value>
+%>
+
+/**
+ *@UsedBy: PredicateBuilder.java
+ *@Description: Template for IN predicates.
+ *@param columnName The column name (with quotes).
+ *@param values List of quoted/formatted values.
+ *@return An IN predicate like "column" IN ('val1','val2')
+ */
+in_predicate(columnName, values) ::= <%
+    <columnName> IN (<values; separator=",">)
+%>
+
+/**
+ *@UsedBy: PredicateBuilder.java
+ *@Description: Template for range predicates (combining multiple conditions with AND).
+ *@param conjuncts List of conjunct strings.
+ *@return A range predicate like (col > 1 AND col < 10)
+ */
+range_predicate(conjuncts) ::= <%
+    (<conjuncts; separator=" AND ">)
+%>
+
+/**
+ *@UsedBy: PredicateBuilder.java
+ *@Description: Template for OR predicates (combining multiple disjuncts).
+ *@param disjuncts List of disjunct strings.
+ *@return An OR predicate like (pred1 OR pred2)
+ */
+or_predicate(disjuncts) ::= <%
+    (<disjuncts; separator=" OR ">)
 %>

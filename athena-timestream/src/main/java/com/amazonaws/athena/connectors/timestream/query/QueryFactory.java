@@ -104,7 +104,7 @@ public class QueryFactory
      * @param templateName The name of the query template.
      * @return The StringTemplate containing the query template that can be used to render and instance of the query template.
      */
-    private ST getQueryTemplate(String templateName)
+    protected ST getQueryTemplate(String templateName)
     {
         return createGroupFile().getInstanceOf(templateName);
     }

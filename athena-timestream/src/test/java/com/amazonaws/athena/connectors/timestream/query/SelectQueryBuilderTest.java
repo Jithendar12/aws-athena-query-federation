@@ -24,6 +24,7 @@ import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Constraints;
 import com.amazonaws.athena.connector.lambda.domain.predicate.EquatableValueSet;
+import com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField;
 import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
 import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
 import com.amazonaws.athena.connector.lambda.domain.predicate.ValueSet;
@@ -167,5 +168,130 @@ public class SelectQueryBuilderTest
         assertEquals(expected, actual);
 
         logger.info("build: buildWithView");
+    }
+
+    @Test
+    public void build_WithOrderBy_IncludesOrderByClause()
+    {
+        logger.info("build_WithOrderBy_IncludesOrderByClause: enter");
+
+        String expected = "SELECT col1, col2 FROM \"myDatabase\".\"myTable\" ORDER BY \"col1\" ASC NULLS FIRST, \"col2\" DESC NULLS LAST";
+
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStringField("col1")
+                .addStringField("col2")
+                .build();
+
+        List<OrderByField> orderByFields = new ArrayList<>();
+        orderByFields.add(new OrderByField("col1", OrderByField.Direction.ASC_NULLS_FIRST));
+        orderByFields.add(new OrderByField("col2", OrderByField.Direction.DESC_NULLS_LAST));
+
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), orderByFields, DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+
+        String actual = queryFactory.createSelectQueryBuilder(VIEW_METADATA_FIELD)
+                .withDatabaseName("myDatabase")
+                .withTableName("myTable")
+                .withProjection(schema)
+                .withConjucts(constraints)
+                .withOrderByClause(constraints)
+                .build().replace("\n", "");
+
+        logger.info("build_WithOrderBy_IncludesOrderByClause: actual[{}]", actual);
+        assertEquals(expected, actual);
+
+        logger.info("build_WithOrderBy_IncludesOrderByClause: exit");
+    }
+
+    @Test
+    public void build_WithLimit_IncludesLimitClause()
+    {
+        logger.info("build_WithLimit_IncludesLimitClause: enter");
+
+        String expected = "SELECT col1 FROM \"myDatabase\".\"myTable\" LIMIT 10";
+
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStringField("col1")
+                .build();
+
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 10L, Collections.emptyMap(), null);
+
+        String actual = queryFactory.createSelectQueryBuilder(VIEW_METADATA_FIELD)
+                .withDatabaseName("myDatabase")
+                .withTableName("myTable")
+                .withProjection(schema)
+                .withConjucts(constraints)
+                .withLimitClause(constraints)
+                .build().replace("\n", "");
+
+        logger.info("build_WithLimit_IncludesLimitClause: actual[{}]", actual);
+        assertEquals(expected, actual);
+
+        logger.info("build_WithLimit_IncludesLimitClause: exit");
+    }
+
+    @Test
+    public void build_WithOrderByAndLimit_IncludesBothClauses()
+    {
+        logger.info("build_WithOrderByAndLimit_IncludesBothClauses: enter");
+
+        String expected = "SELECT col1 FROM \"myDatabase\".\"myTable\" ORDER BY \"col1\" DESC NULLS LAST LIMIT 5";
+
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStringField("col1")
+                .build();
+
+        List<OrderByField> orderByFields = new ArrayList<>();
+        orderByFields.add(new OrderByField("col1", OrderByField.Direction.DESC_NULLS_LAST));
+
+        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), orderByFields, 5L, Collections.emptyMap(), null);
+
+        String actual = queryFactory.createSelectQueryBuilder(VIEW_METADATA_FIELD)
+                .withDatabaseName("myDatabase")
+                .withTableName("myTable")
+                .withProjection(schema)
+                .withConjucts(constraints)
+                .withOrderByClause(constraints)
+                .withLimitClause(constraints)
+                .build().replace("\n", "");
+
+        logger.info("build_WithOrderByAndLimit_IncludesBothClauses: actual[{}]", actual);
+        assertEquals(expected, actual);
+
+        logger.info("build_WithOrderByAndLimit_IncludesBothClauses: exit");
+    }
+
+    @Test
+    public void build_WithWhereAndOrderByAndLimit_IncludesAllClauses()
+    {
+        logger.info("build_WithWhereAndOrderByAndLimit_IncludesAllClauses: enter");
+
+        String expected = "SELECT col1 FROM \"myDatabase\".\"myTable\" WHERE ((\"col1\" > 1)) ORDER BY \"col1\" ASC NULLS FIRST LIMIT 100";
+
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStringField("col1")
+                .build();
+
+        Map<String, ValueSet> constraintsMap = new HashMap<>();
+        constraintsMap.put("col1", SortedRangeSet.copyOf(Types.MinorType.INT.getType(),
+                ImmutableList.of(Range.greaterThan(allocator, Types.MinorType.INT.getType(), 1)), false));
+
+        List<OrderByField> orderByFields = new ArrayList<>();
+        orderByFields.add(new OrderByField("col1", OrderByField.Direction.ASC_NULLS_FIRST));
+
+        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), orderByFields, 100L, Collections.emptyMap(), null);
+
+        String actual = queryFactory.createSelectQueryBuilder(VIEW_METADATA_FIELD)
+                .withDatabaseName("myDatabase")
+                .withTableName("myTable")
+                .withProjection(schema)
+                .withConjucts(constraints)
+                .withOrderByClause(constraints)
+                .withLimitClause(constraints)
+                .build().replace("\n", "");
+
+        logger.info("build_WithWhereAndOrderByAndLimit_IncludesAllClauses: actual[{}]", actual);
+        assertEquals(expected, actual);
+
+        logger.info("build_WithWhereAndOrderByAndLimit_IncludesAllClauses: exit");
     }
 }
