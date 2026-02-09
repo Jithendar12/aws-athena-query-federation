@@ -143,14 +143,9 @@ public class SelectQueryBuilder
                 .map(orderByField -> {
                     String ordering = orderByField.getDirection().isAscending() ? "ASC" : "DESC";
                     String nullsHandling = orderByField.getDirection().isNullsFirst() ? "NULLS FIRST" : "NULLS LAST";
-                    return quoteColumn(orderByField.getColumnName()) + " " + ordering + " " + nullsHandling;
+                    return TimestreamSqlUtils.quoteColumn(orderByField.getColumnName()) + " " + ordering + " " + nullsHandling;
                 })
                 .collect(Collectors.joining(", "));
-    }
-
-    private String quoteColumn(String name)
-    {
-        return "\"" + name + "\"";
     }
 
     public String build()

@@ -50,11 +50,13 @@ public class PredicateBuilderTest
     private static final ArrowType DATEMILLI_TYPE = Types.MinorType.DATEMILLI.getType();
 
     private BlockAllocator allocator;
+    private Map<String, ValueSet> constraintsMap;
 
     @Before
     public void setUp()
     {
         allocator = new BlockAllocatorImpl();
+        constraintsMap = new HashMap<>();
     }
 
     @After
@@ -66,13 +68,12 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithSingleValue_ReturnsEqualityPredicate()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         ValueSet valueSet = SortedRangeSet.newBuilder(INT_TYPE, false)
                 .add(new Range(Marker.exactly(allocator, INT_TYPE, 42), Marker.exactly(allocator, INT_TYPE, 42)))
                 .build();
         constraintsMap.put("intCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
@@ -84,7 +85,6 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithMultipleValues_ReturnsInPredicate()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         SortedRangeSet.Builder builder = SortedRangeSet.newBuilder(INT_TYPE, false);
         for (Object value : new Object[]{1, 2, 3}) {
             builder.add(new Range(Marker.exactly(allocator, INT_TYPE, value), Marker.exactly(allocator, INT_TYPE, value)));
@@ -92,7 +92,7 @@ public class PredicateBuilderTest
         ValueSet valueSet = builder.build();
         constraintsMap.put("intCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
@@ -105,13 +105,12 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithRange_ReturnsRangePredicate()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         ValueSet valueSet = SortedRangeSet.newBuilder(INT_TYPE, false)
                 .add(new Range(Marker.exactly(allocator, INT_TYPE, 10), Marker.exactly(allocator, INT_TYPE, 20)))
                 .build();
         constraintsMap.put("intCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
@@ -124,11 +123,10 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithNullValue_ReturnsNullPredicate()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         ValueSet valueSet = SortedRangeSet.newBuilder(VARCHAR_TYPE, true).build();
         constraintsMap.put("varcharCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
@@ -138,13 +136,12 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithNotNullValue_ReturnsNotNullPredicate()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         ValueSet valueSet = SortedRangeSet.newBuilder(INT_TYPE, false)
                 .add(new Range(Marker.lowerUnbounded(allocator, INT_TYPE), Marker.upperUnbounded(allocator, INT_TYPE)))
                 .build();
         constraintsMap.put("intCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
@@ -154,14 +151,13 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithEquatableValueSet_ReturnsInPredicate()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         ValueSet valueSet = EquatableValueSet.newBuilder(allocator, VARCHAR_TYPE, true, true)
                 .add("val1")
                 .add("val2")
                 .build();
         constraintsMap.put("varcharCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
@@ -173,14 +169,13 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithTimestampValue_FormatsTimestampCorrectly()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         LocalDateTime timestamp = LocalDateTime.of(2024, 4, 5, 9, 31, 12, 142000000);
         ValueSet valueSet = SortedRangeSet.newBuilder(DATEMILLI_TYPE, false)
                 .add(new Range(Marker.exactly(allocator, DATEMILLI_TYPE, timestamp), Marker.exactly(allocator, DATEMILLI_TYPE, timestamp)))
                 .build();
         constraintsMap.put("timeCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
@@ -190,7 +185,6 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithMultipleColumns_ReturnsMultipleConjuncts()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         ValueSet valueSet1 = SortedRangeSet.newBuilder(INT_TYPE, false)
                 .add(new Range(Marker.exactly(allocator, INT_TYPE, 1), Marker.exactly(allocator, INT_TYPE, 1)))
                 .build();
@@ -200,7 +194,7 @@ public class PredicateBuilderTest
         constraintsMap.put("intCol", valueSet1);
         constraintsMap.put("varcharCol", valueSet2);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have two conjuncts", 2, conjuncts.size());
@@ -209,7 +203,7 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithNoConstraints_ReturnsEmptyList()
     {
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(Collections.emptyMap());
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have no conjuncts", 0, conjuncts.size());
@@ -218,13 +212,12 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithGreaterThan_ReturnsGreaterThanPredicate()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         ValueSet valueSet = SortedRangeSet.newBuilder(INT_TYPE, false)
                 .add(new Range(Marker.above(allocator, INT_TYPE, 10), Marker.upperUnbounded(allocator, INT_TYPE)))
                 .build();
         constraintsMap.put("intCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
@@ -235,17 +228,21 @@ public class PredicateBuilderTest
     @Test
     public void buildConjucts_WithLessThan_ReturnsLessThanPredicate()
     {
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         ValueSet valueSet = SortedRangeSet.newBuilder(INT_TYPE, false)
                 .add(new Range(Marker.lowerUnbounded(allocator, INT_TYPE), Marker.below(allocator, INT_TYPE, 20)))
                 .build();
         constraintsMap.put("intCol", valueSet);
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap);
         List<String> conjuncts = PredicateBuilder.buildConjucts(constraints);
 
         assertEquals("Should have one conjunct", 1, conjuncts.size());
         assertTrue("Conjunct should contain <", conjuncts.get(0).contains("<"));
         assertTrue("Conjunct should contain 20", conjuncts.get(0).contains("20"));
+    }
+
+    private Constraints createConstraints(Map<String, ValueSet> constraintsMap)
+    {
+        return new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
     }
 }

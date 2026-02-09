@@ -84,7 +84,7 @@ public class PredicateBuilder
                     queryFactory,
                     "null_predicate",
                     Map.of(
-                        "columnName", quoteColumn(columnName),
+                        "columnName", columnName,
                         "isNull", true
                     )
                 );
@@ -96,7 +96,7 @@ public class PredicateBuilder
                         queryFactory,
                         "null_predicate",
                         Map.of(
-                            "columnName", quoteColumn(columnName),
+                            "columnName", columnName,
                             "isNull", true
                         )
                     )
@@ -109,7 +109,7 @@ public class PredicateBuilder
                     queryFactory,
                     "null_predicate",
                     Map.of(
-                        "columnName", quoteColumn(columnName),
+                        "columnName", columnName,
                         "isNull", false
                     )
                 );
@@ -172,7 +172,7 @@ public class PredicateBuilder
                         queryFactory,
                         "in_predicate",
                         Map.of(
-                            "columnName", quoteColumn(columnName),
+                            "columnName", TimestreamSqlUtils.quoteColumn(columnName),
                             "values", values
                         )
                     )
@@ -189,7 +189,7 @@ public class PredicateBuilder
                     queryFactory,
                     "in_predicate",
                     Map.of(
-                        "columnName", quoteColumn(columnName),
+                        "columnName", TimestreamSqlUtils.quoteColumn(columnName),
                         "values", values
                     )
                 )
@@ -212,16 +212,11 @@ public class PredicateBuilder
             queryFactory,
             "comparison_predicate",
             Map.of(
-                "columnName", quoteColumn(columnName),
+                "columnName", TimestreamSqlUtils.quoteColumn(columnName),
                 "operator", operator,
                 "value", quoteValue(value, type)
             )
         );
-    }
-
-    private static String quoteColumn(String name)
-    {
-        return "\"" + name + "\"";
     }
 
     private static String quoteValue(Object value, ArrowType type)

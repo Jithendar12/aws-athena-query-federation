@@ -49,11 +49,13 @@ public class SelectQueryBuilderTest
     private static final Logger logger = LoggerFactory.getLogger(SelectQueryBuilderTest.class);
     private QueryFactory queryFactory = new QueryFactory();
     private BlockAllocator allocator;
+    private Map<String, ValueSet> constraintsMap;
 
     @Before
     public void setup()
     {
         allocator = new BlockAllocatorImpl();
+        constraintsMap = new HashMap<>();
     }
 
     @After
@@ -69,7 +71,6 @@ public class SelectQueryBuilderTest
 
         String expected = "SELECT col1, col2, col3, col4 FROM \"myDatabase\".\"myTable\" WHERE (\"col4\" IN ('val1','val2')) AND ((\"col2\" < 1)) AND (\"col3\" IN (20000,10000)) AND ((\"col1\" > 1))";
 
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         constraintsMap.put("col1", SortedRangeSet.copyOf(Types.MinorType.INT.getType(),
                 ImmutableList.of(Range.greaterThan(allocator, Types.MinorType.INT.getType(), 1)), false));
         constraintsMap.put("col2", SortedRangeSet.copyOf(Types.MinorType.INT.getType(),
@@ -95,7 +96,7 @@ public class SelectQueryBuilderTest
                 .withDatabaseName("myDatabase")
                 .withTableName("myTable")
                 .withProjection(schema)
-                .withConjucts(new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null))
+                .withConjucts(createConstraints(constraintsMap, Collections.emptyList(), DEFAULT_NO_LIMIT))
                 .build().replace("\n", "");
 
         logger.info("build: actual[{}]", actual);
@@ -110,7 +111,6 @@ public class SelectQueryBuilderTest
 
         String expected = "SELECT val FROM \"myDatabase\".\"myTable\" WHERE ((\"time1\" > '2024-04-05 09:31:12.000000000')) AND ((\"time0\" > '2024-04-05 09:31:12.142000000'))";
 
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         constraintsMap.put("time0", SortedRangeSet.copyOf(Types.MinorType.DATEMILLI.getType(),
                 ImmutableList.of(Range.greaterThan(allocator, Types.MinorType.DATEMILLI.getType(),
                         LocalDateTime.of(2024, 4, 5, 9, 31, 12, 142000000))), false));
@@ -126,7 +126,7 @@ public class SelectQueryBuilderTest
                 .withDatabaseName("myDatabase")
                 .withTableName("myTable")
                 .withProjection(schema)
-                .withConjucts(new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null))
+                .withConjucts(createConstraints(constraintsMap, Collections.emptyList(), DEFAULT_NO_LIMIT))
                 .build().replace("\n", "");
 
         logger.info("build: actual[{}]", actual);
@@ -151,7 +151,6 @@ public class SelectQueryBuilderTest
                 .addMetadata(VIEW_METADATA_FIELD, "SELECT col1 from test_table")
                 .build();
 
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         constraintsMap.put("col1", SortedRangeSet.copyOf(Types.MinorType.INT.getType(),
                 ImmutableList.of(Range.greaterThan(allocator, Types.MinorType.INT.getType(), 1)), false));
         constraintsMap.put("col2", SortedRangeSet.copyOf(Types.MinorType.INT.getType(),
@@ -161,7 +160,7 @@ public class SelectQueryBuilderTest
                 .withDatabaseName("myDatabase")
                 .withTableName("myTable")
                 .withProjection(schema)
-                .withConjucts(new Constraints(constraintsMap, Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null))
+                .withConjucts(createConstraints(constraintsMap, Collections.emptyList(), DEFAULT_NO_LIMIT))
                 .build().replace("\n", "");
 
         logger.info("build: actual[{}]", actual);
@@ -186,7 +185,7 @@ public class SelectQueryBuilderTest
         orderByFields.add(new OrderByField("col1", OrderByField.Direction.ASC_NULLS_FIRST));
         orderByFields.add(new OrderByField("col2", OrderByField.Direction.DESC_NULLS_LAST));
 
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), orderByFields, DEFAULT_NO_LIMIT, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(Collections.emptyMap(), orderByFields, DEFAULT_NO_LIMIT);
 
         String actual = queryFactory.createSelectQueryBuilder(VIEW_METADATA_FIELD)
                 .withDatabaseName("myDatabase")
@@ -213,7 +212,7 @@ public class SelectQueryBuilderTest
                 .addStringField("col1")
                 .build();
 
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 10L, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(Collections.emptyMap(), Collections.emptyList(), 10L);
 
         String actual = queryFactory.createSelectQueryBuilder(VIEW_METADATA_FIELD)
                 .withDatabaseName("myDatabase")
@@ -243,7 +242,7 @@ public class SelectQueryBuilderTest
         List<OrderByField> orderByFields = new ArrayList<>();
         orderByFields.add(new OrderByField("col1", OrderByField.Direction.DESC_NULLS_LAST));
 
-        Constraints constraints = new Constraints(Collections.emptyMap(), Collections.emptyList(), orderByFields, 5L, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(Collections.emptyMap(), orderByFields, 5L);
 
         String actual = queryFactory.createSelectQueryBuilder(VIEW_METADATA_FIELD)
                 .withDatabaseName("myDatabase")
@@ -271,14 +270,13 @@ public class SelectQueryBuilderTest
                 .addStringField("col1")
                 .build();
 
-        Map<String, ValueSet> constraintsMap = new HashMap<>();
         constraintsMap.put("col1", SortedRangeSet.copyOf(Types.MinorType.INT.getType(),
                 ImmutableList.of(Range.greaterThan(allocator, Types.MinorType.INT.getType(), 1)), false));
 
         List<OrderByField> orderByFields = new ArrayList<>();
         orderByFields.add(new OrderByField("col1", OrderByField.Direction.ASC_NULLS_FIRST));
 
-        Constraints constraints = new Constraints(constraintsMap, Collections.emptyList(), orderByFields, 100L, Collections.emptyMap(), null);
+        Constraints constraints = createConstraints(constraintsMap, orderByFields, 100L);
 
         String actual = queryFactory.createSelectQueryBuilder(VIEW_METADATA_FIELD)
                 .withDatabaseName("myDatabase")
@@ -293,5 +291,10 @@ public class SelectQueryBuilderTest
         assertEquals(expected, actual);
 
         logger.info("build_WithWhereAndOrderByAndLimit_IncludesAllClauses: exit");
+    }
+
+    private Constraints createConstraints(Map<String, ValueSet> constraintsMap, List<OrderByField> orderByFields, long limit)
+    {
+        return new Constraints(constraintsMap, Collections.emptyList(), orderByFields, limit, Collections.emptyMap(), null);
     }
 }

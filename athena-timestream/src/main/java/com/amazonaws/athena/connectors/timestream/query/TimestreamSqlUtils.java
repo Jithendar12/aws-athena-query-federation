@@ -50,4 +50,15 @@ public class TimestreamSqlUtils
 
         return template.render().trim();
     }
+
+    /**
+     * Quotes a column name for use in SQL queries.
+     *
+     * @param name The column name to quote.
+     * @return The quoted column name.
+     */
+    public static String quoteColumn(String name)
+    {
+        return "\"" + name + "\"";
+    }
 }
