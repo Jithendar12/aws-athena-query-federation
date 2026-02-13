@@ -199,7 +199,7 @@ public class RedisRecordHandlerTest
     }
 
     @Test
-    public void doReadRecordsLiteral()
+    public void doReadRecords_withLiteralValueTypeAndConstraints_returnsFilteredRecords()
             throws Exception
     {
         //4 keys per prefix
@@ -284,7 +284,7 @@ public class RedisRecordHandlerTest
     }
 
     @Test
-    public void doReadRecordsHash()
+    public void doReadRecords_withHashValueTypeAndConstraints_returnsFilteredRecords()
             throws Exception
     {
         //4 keys per prefix
@@ -388,7 +388,7 @@ public class RedisRecordHandlerTest
     }
 
     @Test
-    public void doReadRecordsZset()
+    public void doReadRecords_withZsetValueTypeAndConstraints_returnsFilteredRecords()
             throws Exception
     {
         //4 keys per prefix
@@ -561,6 +561,43 @@ public class RedisRecordHandlerTest
         assertEquals("value1, value2, value3, value4", writtenValues.toString());
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void doReadRecords_withInvalidKeyTypeId_throwsIllegalArgumentException()
+            throws Exception
+    {
+        S3SpillLocation splitLoc = S3SpillLocation.newBuilder()
+                .withBucket(UUID.randomUUID().toString())
+                .withSplitId(UUID.randomUUID().toString())
+                .withQueryId(UUID.randomUUID().toString())
+                .withIsDirectory(true)
+                .build();
+
+        Split split = Split.newBuilder(splitLoc, keyFactory.create())
+                .add(REDIS_ENDPOINT_PROP, endpoint)
+                .add(KEY_TYPE, "invalid_key_type")
+                .add(KEY_PREFIX_TABLE_PROP, "key-*")
+                .add(VALUE_TYPE_TABLE_PROP, ValueType.LITERAL.getId())
+                .build();
+
+        Schema schemaForRead = SchemaBuilder.newBuilder()
+                .addField("_key_", Types.MinorType.VARCHAR.getType())
+                .addField("intcol", Types.MinorType.INT.getType())
+                .build();
+
+        ReadRecordsRequest request = new ReadRecordsRequest(IDENTITY,
+                DEFAULT_CATALOG,
+                "queryId-" + System.currentTimeMillis(),
+                TABLE_NAME,
+                schemaForRead,
+                split,
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                100_000_000_000L,
+                100_000_000_000L
+        );
+
+        handler.doReadRecords(allocator, request);
+    }
+    
     private class ByteHolder
     {
         private byte[] bytes;

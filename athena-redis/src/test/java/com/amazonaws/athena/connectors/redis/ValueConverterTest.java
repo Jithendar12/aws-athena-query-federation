@@ -2,7 +2,7 @@
  * #%L
  * athena-redis
  * %%
- * Copyright (C) 2019 - 2025 Amazon Web Services
+ * Copyright (C) 2019 - 2026 Amazon Web Services
  * %%
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -98,5 +98,33 @@ public class ValueConverterTest
     {
         Field field = mockField(new ArrowType.Decimal(10, 2, 128));
         ValueConverter.convert(field, "100.00");
+    }
+
+    @Test(expected = NumberFormatException.class)
+    public void convert_withInvalidBigIntFormat_throwsNumberFormatException()
+    {
+        Field field = mockField(new ArrowType.Int(64, true));
+        ValueConverter.convert(field, "not-a-number");
+    }
+
+    @Test(expected = NumberFormatException.class)
+    public void convert_withInvalidIntegerFormat_throwsNumberFormatException()
+    {
+        Field field = mockField(new ArrowType.Int(32, true));
+        ValueConverter.convert(field, "not-a-number");
+    }
+
+    @Test(expected = NumberFormatException.class)
+    public void convert_withInvalidFloatFormat_throwsNumberFormatException()
+    {
+        Field field = mockField(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE));
+        ValueConverter.convert(field, "not-a-number");
+    }
+
+    @Test(expected = NumberFormatException.class)
+    public void convert_withInvalidDoubleFormat_throwsNumberFormatException()
+    {
+        Field field = mockField(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
+        ValueConverter.convert(field, "not-a-number");
     }
 }

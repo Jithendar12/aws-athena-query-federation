@@ -177,7 +177,7 @@ public class RedisMetadataHandlerTest
     }
 
     @Test
-    public void doGetTableLayout()
+    public void doGetTableLayout_withValidRequest_returnsPartitionsWithExpectedFields()
             throws Exception
     {
         Schema schema = SchemaBuilder.newBuilder().build();
@@ -203,11 +203,9 @@ public class RedisMetadataHandlerTest
     }
 
     @Test
-    public void doGetSplitsZset()
+    public void doGetSplits_withZsetValueTypeAndMultiplePrefixes_returnsExpectedSplits()
     {
         //3 prefixes for this table
-        String prefixes = PREFIXES_MULTIPLE;
-
         //4 zsets per prefix
         when(mockSyncCommands.scan(nullable(ScanCursor.class), nullable(ScanArgs.class))).then((InvocationOnMock invocationOnMock) -> {
             ScanCursor cursor = (ScanCursor) invocationOnMock.getArguments()[0];
@@ -240,7 +238,7 @@ public class RedisMetadataHandlerTest
         Schema schema = createSplitSchema();
 
         Block partitions = createPartitionsBlock(schema, endpoint, LITERAL_VALUE_TYPE,
-                null, prefixes, null, null, null);
+                null, PREFIXES_MULTIPLE, null, null, null);
 
         String continuationToken;
         GetSplitsRequest originalReq = new GetSplitsRequest(IDENTITY,
@@ -263,7 +261,7 @@ public class RedisMetadataHandlerTest
         continuationToken = response.getContinuationToken();
 
         logger.info("doGetSplitsPrefix: continuationToken[{}] - numSplits[{}]",
-                new Object[] {continuationToken, response.getSplits().size()});
+                continuationToken, response.getSplits().size());
 
         assertEquals("Continuation criteria violated", 120, response.getSplits().size());
         assertNull("Continuation criteria violated", response.getContinuationToken());
@@ -272,7 +270,7 @@ public class RedisMetadataHandlerTest
     }
 
     @Test
-    public void doGetSplitsPrefix()
+    public void doGetSplits_withKeyPrefixes_returnsOneSplitPerPrefix()
     {
         Schema schema = createSplitSchema();
 
@@ -300,10 +298,19 @@ public class RedisMetadataHandlerTest
         continuationToken = response.getContinuationToken();
 
         logger.info("doGetSplitsPrefix: continuationToken[{}] - numSplits[{}]",
-                new Object[] {continuationToken, response.getSplits().size()});
+                continuationToken, response.getSplits().size());
         
         assertEquals("Continuation criteria violated", 3, response.getSplits().size());
         assertNull("Continuation criteria violated", response.getContinuationToken());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void doGetQueryPassthroughSchema_whenNotQueryPassthrough_throwsIllegalArgumentException() throws Exception
+    {
+        GetTableRequest request = new GetTableRequest(IDENTITY, QUERY_ID, DEFAULT_CATALOG,
+                TABLE_NAME, Collections.emptyMap());
+
+        handler.doGetQueryPassthroughSchema(allocator, request);
     }
 
     @Test

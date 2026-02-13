@@ -2,7 +2,7 @@
  * #%L
  * athena-redis
  * %%
- * Copyright (C) 2019 - 2025 Amazon Web Services
+ * Copyright (C) 2019 - 2026 Amazon Web Services
  * %%
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -112,5 +112,17 @@ public class RedisConnectionFactoryTest
     public void getOrCreateConn_withInvalidEndpoint_throwsException()
     {
         factory.getOrCreateConn("invalid_endpoint", false, false);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void getOrCreateConn_withEmptyEndpoint_throwsException()
+    {
+        factory.getOrCreateConn("", false, false);
+    }
+    
+    @Test(expected = NumberFormatException.class)
+    public void getOrCreateConn_withNonNumericPort_throwsNumberFormatException()
+    {
+        factory.getOrCreateConn("localhost:notaport", false, false);
     }
 }
