@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.UUID;
 
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
+import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
@@ -122,5 +123,29 @@ public class AwsCmdbRecordHandlerTest
         handler.readWithConstraint(mockBlockSpiller, request, queryStatusChecker);
 
         verify(mockTableProvider, times(1)).readWithConstraint(nullable(BlockSpiller.class), eq(request), eq(queryStatusChecker));
+    }
+
+    @Test
+    public void readWithConstraint_whenTableUnknown_throwsNullPointerException()
+    {
+        when(mockTableProviderFactory.getTableProviders()).thenReturn(Collections.emptyMap());
+        AwsCmdbRecordHandler handlerWithEmptyProviders = new AwsCmdbRecordHandler(mockS3, mockSecretsManager, mockAthena, mockTableProviderFactory, com.google.common.collect.ImmutableMap.of());
+
+        ReadRecordsRequest request = new ReadRecordsRequest(identity, "catalog",
+                "queryId",
+                new TableName("unknown_schema", "unknown_table"),
+                SchemaBuilder.newBuilder().build(),
+                Split.newBuilder(S3SpillLocation.newBuilder()
+                        .withBucket(bucket)
+                        .withSplitId(UUID.randomUUID().toString())
+                        .withQueryId(UUID.randomUUID().toString())
+                        .withIsDirectory(true)
+                        .build(), keyFactory.create()).build(),
+                new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                100_000,
+                100_000);
+
+        assertThrows(NullPointerException.class, () ->
+                handlerWithEmptyProviders.readWithConstraint(mockBlockSpiller, request, queryStatusChecker));
     }
 }

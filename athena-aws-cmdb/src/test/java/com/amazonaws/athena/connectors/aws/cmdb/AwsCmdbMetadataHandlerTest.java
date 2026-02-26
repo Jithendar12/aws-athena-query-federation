@@ -36,6 +36,8 @@ import com.amazonaws.athena.connector.lambda.metadata.ListSchemasResponse;
 import com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest;
 import com.amazonaws.athena.connector.lambda.metadata.ListTablesResponse;
 import com.amazonaws.athena.connector.lambda.security.FederatedIdentity;
+import com.amazonaws.athena.connector.lambda.QueryStatusChecker;
+import com.amazonaws.athena.connector.lambda.data.BlockWriter;
 import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
 import com.amazonaws.athena.connectors.aws.cmdb.tables.TableProvider;
 import org.junit.After;
@@ -56,8 +58,10 @@ import java.util.Map;
 
 import static com.amazonaws.athena.connector.lambda.domain.predicate.Constraints.DEFAULT_NO_LIMIT;
 import static com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest.UNLIMITED_PAGE_SIZE_VALUE;
-import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -203,6 +207,94 @@ public class AwsCmdbMetadataHandlerTest
 
         GetSplitsResponse response = handler.doGetSplits(blockAllocator, request);
 
-        assertNotNull(response);
+        assertNotNull("GetSplits response should not be null", response);
+    }
+
+    @Test
+    public void doGetTable_whenTableUnknown_throwsRuntimeException() throws Exception
+    {
+        TableName unknownTable = new TableName("unknown_schema", "unknown_table");
+        try (GetTableRequest request = new GetTableRequest(identity, queryId, catalog, unknownTable, Collections.emptyMap())) {
+            RuntimeException ex = assertThrows(RuntimeException.class, () ->
+                    handler.doGetTable(blockAllocator, request));
+            assertTrue("Exception message should contain Unknown table",
+                    ex.getMessage().contains("Unknown table"));
+            assertTrue("Exception message should contain table identifier",
+                    ex.getMessage().contains("unknown_schema") || ex.getMessage().contains(unknownTable.toString()));
+        }
+    }
+
+    @Test
+    public void enhancePartitionSchema_whenTableUnknown_throwsRuntimeException()
+    {
+        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, queryId, catalog,
+                new TableName("unknown_schema", "unknown_table"),
+                mockConstraints,
+                SchemaBuilder.newBuilder().build(),
+                Collections.EMPTY_SET);
+
+        RuntimeException ex = assertThrows(RuntimeException.class, () ->
+                handler.enhancePartitionSchema(SchemaBuilder.newBuilder(), request));
+        assertTrue("Exception message should contain Unknown table",
+                ex.getMessage().contains("Unknown table"));
+    }
+
+    @Test
+    public void getPartitions_whenTableUnknown_throwsRuntimeException()
+    {
+        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, queryId, catalog,
+                new TableName("unknown_schema", "unknown_table"),
+                mockConstraints,
+                SchemaBuilder.newBuilder().build(),
+                Collections.emptySet());
+        BlockWriter mockBlockWriter = mock(BlockWriter.class);
+        try (QueryStatusChecker mockQueryStatusChecker = mock(QueryStatusChecker.class)) {
+            RuntimeException ex = assertThrows(RuntimeException.class, () ->
+                    handler.getPartitions(mockBlockWriter, request, mockQueryStatusChecker));
+            assertTrue("Exception message should contain Unknown table",
+                    ex.getMessage().contains("Unknown table"));
+        }
+    }
+
+    @Test
+    public void getPartitions_whenTableKnown_invokesProviderGetPartitions() throws Exception
+    {
+        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, queryId, catalog,
+                new TableName("schema1", "table1"),
+                mockConstraints,
+                SchemaBuilder.newBuilder().build(),
+                Collections.emptySet());
+        BlockWriter mockBlockWriter = mock(BlockWriter.class);
+        try (QueryStatusChecker mockQueryStatusChecker = mock(QueryStatusChecker.class)) {
+            handler.getPartitions(mockBlockWriter, request, mockQueryStatusChecker);
+
+            verify(mockTableProvider1, times(1)).getPartitions(eq(mockBlockWriter), eq(request));
+        }
+    }
+
+    @Test
+    public void doGetSplits_whenTableUnknown_throwsRuntimeException()
+    {
+        GetSplitsRequest request = new GetSplitsRequest(identity, queryId, catalog,
+                new TableName("unknown_schema", "unknown_table"),
+                mockBlock,
+                Collections.emptyList(),
+                new Constraints(new HashMap<>(), Collections.emptyList(), Collections.emptyList(), DEFAULT_NO_LIMIT, Collections.emptyMap(), null),
+                null);
+
+        RuntimeException ex = assertThrows(RuntimeException.class, () ->
+                handler.doGetSplits(blockAllocator, request));
+        assertTrue("Exception message should contain Unknown table",
+                ex.getMessage().contains("Unknown table"));
+    }
+
+    @Test
+    public void doListTables_whenSchemaUnknown_throwsNullPointerException() throws Exception
+    {
+        try (ListTablesRequest request = new ListTablesRequest(identity, queryId, catalog, "unknown_schema",
+                null, UNLIMITED_PAGE_SIZE_VALUE)) {
+            assertThrows(NullPointerException.class, () ->
+                    handler.doListTables(blockAllocator, request));
+        }
     }
 }
