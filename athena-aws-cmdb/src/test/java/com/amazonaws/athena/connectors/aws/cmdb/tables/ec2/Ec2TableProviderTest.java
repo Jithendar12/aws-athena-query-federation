@@ -296,7 +296,7 @@ public class Ec2TableProviderTest
     {
         reset(mockEc2);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl()) {
-            Ec2TableProvider provider = new Ec2TableProvider(mockEc2);
+            Ec2TableProvider provider = (Ec2TableProvider) setUpSource();
             when(mockEc2.describeInstances(any(DescribeInstancesRequest.class)))
                     .thenReturn(DescribeInstancesResponse.builder()
                             .reservations(Collections.singletonList(Reservation.builder().instances(Collections.singletonList(makeInstance("id"))).build()))

@@ -227,11 +227,7 @@ public class AwsCmdbMetadataHandlerTest
     @Test
     public void enhancePartitionSchema_whenTableUnknown_throwsRuntimeException()
     {
-        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, queryId, catalog,
-                new TableName("unknown_schema", "unknown_table"),
-                mockConstraints,
-                SchemaBuilder.newBuilder().build(),
-                Collections.EMPTY_SET);
+        GetTableLayoutRequest request = createGetTableLayoutRequest(new TableName("unknown_schema", "unknown_table"));
 
         RuntimeException ex = assertThrows(RuntimeException.class, () ->
                 handler.enhancePartitionSchema(SchemaBuilder.newBuilder(), request));
@@ -242,11 +238,7 @@ public class AwsCmdbMetadataHandlerTest
     @Test
     public void getPartitions_whenTableUnknown_throwsRuntimeException()
     {
-        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, queryId, catalog,
-                new TableName("unknown_schema", "unknown_table"),
-                mockConstraints,
-                SchemaBuilder.newBuilder().build(),
-                Collections.emptySet());
+        GetTableLayoutRequest request = createGetTableLayoutRequest(new TableName("unknown_schema", "unknown_table"));
         BlockWriter mockBlockWriter = mock(BlockWriter.class);
         try (QueryStatusChecker mockQueryStatusChecker = mock(QueryStatusChecker.class)) {
             RuntimeException ex = assertThrows(RuntimeException.class, () ->
@@ -259,11 +251,7 @@ public class AwsCmdbMetadataHandlerTest
     @Test
     public void getPartitions_whenTableKnown_invokesProviderGetPartitions() throws Exception
     {
-        GetTableLayoutRequest request = new GetTableLayoutRequest(identity, queryId, catalog,
-                new TableName("schema1", "table1"),
-                mockConstraints,
-                SchemaBuilder.newBuilder().build(),
-                Collections.emptySet());
+        GetTableLayoutRequest request = createGetTableLayoutRequest(new TableName("schema1", "table1"));
         BlockWriter mockBlockWriter = mock(BlockWriter.class);
         try (QueryStatusChecker mockQueryStatusChecker = mock(QueryStatusChecker.class)) {
             handler.getPartitions(mockBlockWriter, request, mockQueryStatusChecker);
@@ -296,5 +284,13 @@ public class AwsCmdbMetadataHandlerTest
             assertThrows(NullPointerException.class, () ->
                     handler.doListTables(blockAllocator, request));
         }
+    }
+
+    private GetTableLayoutRequest createGetTableLayoutRequest(TableName tableName)
+    {
+        return new GetTableLayoutRequest(identity, queryId, catalog, tableName,
+                mockConstraints,
+                SchemaBuilder.newBuilder().build(),
+                Collections.emptySet());
     }
 }

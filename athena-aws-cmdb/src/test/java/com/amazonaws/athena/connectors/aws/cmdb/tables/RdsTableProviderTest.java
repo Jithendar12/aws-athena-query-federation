@@ -265,7 +265,7 @@ public class RdsTableProviderTest
     {
         reset(mockRds);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl()) {
-            RdsTableProvider provider = new RdsTableProvider(mockRds);
+            RdsTableProvider provider = (RdsTableProvider) setUpSource();
             when(mockRds.describeDBInstances(any(DescribeDbInstancesRequest.class)))
                     .thenReturn(DescribeDbInstancesResponse.builder().dbInstances(Collections.emptyList()).build());
 
@@ -289,7 +289,7 @@ public class RdsTableProviderTest
     {
         reset(mockRds);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl()) {
-            RdsTableProvider provider = new RdsTableProvider(mockRds);
+            RdsTableProvider provider = (RdsTableProvider) setUpSource();
             when(mockRds.describeDBInstances(any(DescribeDbInstancesRequest.class)))
                     .thenReturn(DescribeDbInstancesResponse.builder().dbInstances(Collections.emptyList()).build());
 
@@ -318,7 +318,7 @@ public class RdsTableProviderTest
     {
         reset(mockRds);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl()) {
-            RdsTableProvider provider = new RdsTableProvider(mockRds);
+            RdsTableProvider provider = (RdsTableProvider) setUpSource();
             AtomicInteger callCount = new AtomicInteger(0);
             when(mockRds.describeDBInstances(any(DescribeDbInstancesRequest.class)))
                     .thenAnswer((Answer<DescribeDbInstancesResponse>) invocation -> {
@@ -352,7 +352,7 @@ public class RdsTableProviderTest
     public void readWithConstraint_whenBlockInvokesResolverWithUnexpectedField_throwsRuntimeException() throws Exception {
         reset(mockRds);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl()) {
-            RdsTableProvider provider = new RdsTableProvider(mockRds);
+            RdsTableProvider provider = (RdsTableProvider) setUpSource();
             when(mockRds.describeDBInstances(any(DescribeDbInstancesRequest.class)))
                     .thenReturn(DescribeDbInstancesResponse.builder()
                             .dbInstances(Collections.singletonList(makeValue("id")))
@@ -409,7 +409,7 @@ public class RdsTableProviderTest
                     .dbSubnetGroup(subnetGroup)
                     .build();
 
-            RdsTableProvider provider = new RdsTableProvider(mockRds);
+            RdsTableProvider provider = (RdsTableProvider) setUpSource();
             when(mockRds.describeDBInstances(any(DescribeDbInstancesRequest.class)))
                     .thenReturn(DescribeDbInstancesResponse.builder()
                             .dbInstances(Collections.singletonList(instanceWithDescription))
@@ -472,7 +472,7 @@ public class RdsTableProviderTest
                     .dbSubnetGroup(subnetGroup)
                     .build();
 
-            RdsTableProvider provider = new RdsTableProvider(mockRds);
+            RdsTableProvider provider = (RdsTableProvider) setUpSource();
             when(mockRds.describeDBInstances(any(DescribeDbInstancesRequest.class)))
                     .thenReturn(DescribeDbInstancesResponse.builder()
                             .dbInstances(Collections.singletonList(instanceWithSubnet))
@@ -607,7 +607,7 @@ public class RdsTableProviderTest
     {
         reset(mockRds);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl()) {
-            RdsTableProvider provider = new RdsTableProvider(mockRds);
+            RdsTableProvider provider = (RdsTableProvider) setUpSource();
             when(mockRds.describeDBInstances(any(DescribeDbInstancesRequest.class)))
                     .thenReturn(DescribeDbInstancesResponse.builder()
                             .dbInstances(Collections.singletonList(makeValue("id")))

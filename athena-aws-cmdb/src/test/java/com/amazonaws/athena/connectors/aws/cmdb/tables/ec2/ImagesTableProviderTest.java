@@ -217,7 +217,7 @@ public class ImagesTableProviderTest
     {
         reset(mockEc2);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl()) {
-            ImagesTableProvider provider = new ImagesTableProvider(mockEc2, Collections.emptyMap());
+            ImagesTableProvider provider = (ImagesTableProvider) setUpSource();
             when(mockEc2.describeImages(any(DescribeImagesRequest.class)))
                     .thenReturn(DescribeImagesResponse.builder()
                             .images(Collections.singletonList(makeImage("ami-1")))
@@ -277,7 +277,7 @@ public class ImagesTableProviderTest
         reset(mockEc2);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl();
                 QueryStatusChecker mockChecker = mock(QueryStatusChecker.class)) {
-            ImagesTableProvider provider = new ImagesTableProvider(mockEc2, Collections.emptyMap());
+            ImagesTableProvider provider = (ImagesTableProvider) setUpSource();
             ReadRecordsRequest request = buildReadRequest(provider, allocator, Collections.emptyMap());
             BlockSpiller mockSpiller = mock(BlockSpiller.class);
 
@@ -294,7 +294,7 @@ public class ImagesTableProviderTest
         reset(mockEc2);
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl();
                 QueryStatusChecker mockChecker = mock(QueryStatusChecker.class)) {
-            ImagesTableProvider provider = new ImagesTableProvider(mockEc2, Collections.emptyMap());
+            ImagesTableProvider provider = (ImagesTableProvider) setUpSource();
             List<Image> tooMany = new ArrayList<>();
             for (int i = 0; i < 1002; i++) {
                 tooMany.add(makeImage("ami-" + i));
@@ -324,7 +324,7 @@ public class ImagesTableProviderTest
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl();
                 Block mockBlock = mock(Block.class);
                 QueryStatusChecker mockChecker = mock(QueryStatusChecker.class)) {
-            ImagesTableProvider provider = new ImagesTableProvider(mockEc2, Collections.emptyMap());
+            ImagesTableProvider provider = (ImagesTableProvider) setUpSource();
             when(mockEc2.describeImages(any(DescribeImagesRequest.class)))
                     .thenReturn(DescribeImagesResponse.builder()
                             .images(Collections.singletonList(makeImage("ami-1")))
@@ -371,7 +371,7 @@ public class ImagesTableProviderTest
         try (BlockAllocatorImpl allocator = new BlockAllocatorImpl();
                 Block mockBlock = mock(Block.class);
                 QueryStatusChecker mockChecker = mock(QueryStatusChecker.class)) {
-            ImagesTableProvider provider = new ImagesTableProvider(mockEc2, Collections.emptyMap());
+            ImagesTableProvider provider = (ImagesTableProvider) setUpSource();
             when(mockEc2.describeImages(any(DescribeImagesRequest.class)))
                     .thenReturn(DescribeImagesResponse.builder()
                             .images(Collections.singletonList(makeImage("ami-1")))
