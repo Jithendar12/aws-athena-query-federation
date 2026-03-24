@@ -905,7 +905,7 @@ public class ElasticsearchMetadataHandlerTest
         
         Map<String, String> result = testHandler.resolveDomainMap(config);
         assertNotNull("Domain map should not be null", result);
-        assertTrue("Should contain mydomain or document current behavior", result.containsKey("mydomain") || result.isEmpty());
+        assertTrue("Should contain mydomain", result.containsKey("mydomain"));
     }
 
     @Test
@@ -925,7 +925,7 @@ public class ElasticsearchMetadataHandlerTest
         
         Map<String, String> result = testHandler.resolveDomainMap(config);
         assertNotNull("Domain map should not be null", result);
-        assertTrue("Should contain default domain or document current behavior", result.containsKey("default") || result.isEmpty());
+        assertTrue("Should contain default domain", result.containsKey("default"));
     }
 
     @Test
@@ -1034,7 +1034,7 @@ public class ElasticsearchMetadataHandlerTest
         
         Map<String, String> result = testHandler.resolveDomainMap(config);
         assertNotNull("Domain map should not be null", result);
-        assertTrue("Should contain default domain or document current behavior", result.containsKey("default") || result.isEmpty());
+        assertTrue("Should contain default domain", result.containsKey("default"));
     }
 
     @Test
@@ -1053,7 +1053,7 @@ public class ElasticsearchMetadataHandlerTest
         
         Map<String, String> result = testHandler.resolveDomainMap(config);
         assertNotNull("Domain map should not be null", result);
-        assertTrue("Should contain movies domain or document current behavior", result.containsKey("movies") || result.isEmpty());
+        assertTrue("Should contain movies domain", result.containsKey("movies"));
     }
 
     @Test
