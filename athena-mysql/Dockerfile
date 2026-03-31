@@ -11,9 +11,9 @@ ARG JAVA_TOOL_OPTIONS=""
 ENV JAVA_TOOL_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED -XX:-TieredCompilation ${JAVA_TOOL_OPTIONS}"
 
 # Copy function code and runtime dependencies from Maven layout
-COPY target/athena-mysql-2022.47.1.jar ${LAMBDA_TASK_ROOT}
+COPY target/athena-mysql-2026.13.1.jar ${LAMBDA_TASK_ROOT}
 # Unpack the jar
-RUN jar xf athena-mysql-2022.47.1.jar
+RUN jar xf athena-mysql-2026.13.1.jar
 
 # Command can be overwritten by providing a different command in the template directly.
 # No need to specify here (already defined in .yaml file because legacy and connections use different)

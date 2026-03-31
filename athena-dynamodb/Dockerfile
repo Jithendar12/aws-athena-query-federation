@@ -17,6 +17,6 @@ ARG JAVA_TOOL_OPTIONS=""
 ENV JAVA_TOOL_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED -XX:-TieredCompilation ${JAVA_TOOL_OPTIONS}"
 
 # Copy function code and runtime dependencies from Maven layout
-COPY target/athena-dynamodb-2022.47.1.jar ${LAMBDA_TASK_ROOT}
+COPY target/athena-dynamodb-2026.13.1.jar ${LAMBDA_TASK_ROOT}
 # Unpack the jar
-RUN jar xf athena-dynamodb-2022.47.1.jar
+RUN jar xf athena-dynamodb-2026.13.1.jar
